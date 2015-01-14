@@ -1,0 +1,40 @@
+ar: creating archive libbase.a
+ar: creating archive libstree.a
+combineMUMs.cc:109:27: warning: conversion from string literal to 'char *' is deprecated [-Wc++11-compat-deprecated-writable-strings]
+char  * Error_File_Name = DEFAULT_ERROR_FILE_NAME;
+                          ^
+combineMUMs.cc:26:38: note: expanded from macro 'DEFAULT_ERROR_FILE_NAME'
+#define  DEFAULT_ERROR_FILE_NAME     "witherrors.gaps"
+                                     ^
+combineMUMs.cc:135:24: warning: conversion from string literal to 'char *' is deprecated [-Wc++11-compat-deprecated-writable-strings]
+char  * Query_Suffix = "Query";
+                       ^
+combineMUMs.cc:145:22: warning: conversion from string literal to 'char *' is deprecated [-Wc++11-compat-deprecated-writable-strings]
+char  * Ref_Suffix = "Ref";
+                     ^
+3 warnings generated.
+mgaps.cc:533:20: warning: conversion from string literal to 'char *' is deprecated [-Wc++11-compat-deprecated-writable-strings]
+           label = "#\n";
+                   ^
+mgaps.cc:620:19: warning: conversion from string literal to 'char *' is deprecated [-Wc++11-compat-deprecated-writable-strings]
+          label = "#\n";
+                  ^
+2 warnings generated.
+repeat-match.cc:850:43: warning: '&&' within '||' [-Wlogical-op-parentheses]
+                  || i > String_Separator && j > String_Separator)
+                  ~~ ~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~
+repeat-match.cc:850:43: note: place parentheses around the '&&' expression to silence this warning
+                  || i > String_Separator && j > String_Separator)
+                                          ^
+                     (                                           )
+1 warning generated.
+show-coords.cc:799:12: warning: conversion from string literal to 'char *' is deprecated [-Wc++11-compat-deprecated-writable-strings]
+    type = "NUCMER";
+           ^
+show-coords.cc:801:12: warning: conversion from string literal to 'char *' is deprecated [-Wc++11-compat-deprecated-writable-strings]
+    type = "PROMER";
+           ^
+show-coords.cc:803:12: warning: conversion from string literal to 'char *' is deprecated [-Wc++11-compat-deprecated-writable-strings]
+    type = "NULL";
+           ^
+3 warnings generated.
