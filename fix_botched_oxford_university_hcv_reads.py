@@ -19,7 +19,7 @@ for fastq_pair in fastq_pairs:
 		with open(path_to_reads + '/fixed/' +  fastq_pair[0], 'w') as fixed_fwd_fastq:
 			fixed_fwd_records = []
 			for fwd_record in SeqIO.parse(fwd_fastq, 'fastq'):
-				fwd_record.description = fwd_record.description.replace('/2','/1')
+				fwd_record.name = fwd_record.name.replace('/2','/1')
+				fwd_record.description = ''
 				fixed_fwd_records.append(fwd_record)
 			SeqIO.write(fixed_fwd_records, fixed_fwd_fastq, 'fastq')
-	# ...
