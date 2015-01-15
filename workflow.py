@@ -4,6 +4,8 @@
 # SPAdes pipeline for paired-end HepC assembly developed on placement at PHE
 
 # TODO
+
+# | use khmer for deinterleaving (split-paired-reads.py)
 # | replace envoy calls with a less broken subprocess wrapper
 # | add minimum similarity threshold for reference selection
 # | Build command strings using  cleaner printf() style variable susbtituion
@@ -76,18 +78,18 @@ def sample_reads(n_reads):
 
 def choose_reference(n_reads):
 	print('Choosing optimal reference sequence...')
-	# Check if blast index exists
-	# cmd_blastn_index = envoy.run(''
-	# + 'makeblastdb -dbtype nucl -input_type fasta -in '
-	# + pipe_path + '/res/hcv_db/db.fasta -title db')
+	if not os.path.exists(pipe_path + '/res/hcv_db/db.nhr'):
+		cmd_blastn_index = envoy.run(''
+		+ 'makeblastdb -dbtype nucl -input_type fasta -in '
+		+ pipe_path + '/res/hcv_db/db.fasta -title db')
 	cmd_blastn = NcbiblastnCommandline(
-		query = job_path + '/sample/sample.fasta',
-		db = pipe_path + '/res/hcv_db/db.fasta',
-		out = job_path + '/blast/blast.tsv',
-		evalue = 1e-10,
-		outfmt = 7,
-		num_alignments = 1,
-		num_threads = n_threads)
+	query = job_path + '/sample/sample.fasta',
+	db = pipe_path + '/res/hcv_db/db.fasta',
+	out = job_path + '/blast/blast.tsv',
+	evalue = 1e-10,
+	outfmt = 7,
+	num_alignments = 1,
+	num_threads = n_threads)
 	cmd_blastn()
 
 	accession_freqs = {}
@@ -228,7 +230,8 @@ def normalise():
 	return norm_perms
 
 def assemble(norm_perms):
-	untrusted_contigs_params = [True, False] 
+	k_params_str = '21,33,43,55,77,99'
+	untrusted_contigs_params = [False]
 	asm_perms = [{'k':n['k'], 'c':n['c'], 'uc':uc} for n in norm_perms for uc in untrusted_contigs_params]
 	for asm_perm in asm_perms:
 		print('Assembling with SPAdes... ')
@@ -236,7 +239,7 @@ def assemble(norm_perms):
 		norm_path_prefix = job_path + '/norm/norm_k' + k + 'c' + c		
 		asm_path = job_path + '/asm/asm_uc' + uc + '.norm_k' + k + 'c' + c
 		cmd_asm = (''
-		+ 'spades.py -m 8 -t ' + str(n_threads) + ' -k 15,21,27,33,43,55,77,99 '
+		+ 'spades.py -m 8 -t ' + str(n_threads) + ' -k ' + k_params_str + ' '
 		+ '--pe1-1 ' + norm_path_prefix + '.r1_pe.fastq '
 		+ '--pe1-2 ' + norm_path_prefix + '.r2_pe.fastq '
 		+ '--s1 ' + norm_path_prefix + '.se.fastq '
@@ -248,7 +251,7 @@ def assemble(norm_perms):
 		print('...SPAdes completed ') if cmd_asm.status_code == 0 else sys.exit('...Error (SPAdes) \n' + cmd_asm.std_out +  '\n' + cmd_asm.std_err)
 
 def choose_assembly():
-	asm_paths = [job_path + '/asm/' + dir + '/contigs.fasta' for dir in os.listdir(job_path + '/asm')]
+	asm_paths = [job_path + '/asm/' + dir + '/contigs.fasta' for dir in os.listdir(job_path + '/asm') if dir.startswith('asm')]
 	print(asm_paths)
 	os.system('quast.py ' + ' '.join(asm_paths) + ' -R ' + job_path + '/ref/ref.fasta -o ' + job_path
 	+ '/eval' + ' --threads ' + str(n_threads))
@@ -266,17 +269,14 @@ def run_pipeline():
 	# rev_reads_sig = '_R.'
 	fwd_reads_sig = '_R1.'
 	rev_reads_sig = '_R2.'
+	
 	merge_reads(fwd_reads_sig, rev_reads_sig)
 	n_reads = count_reads()
 	sample_reads(n_reads)
 	reference_accession, reference_path, reference_len = choose_reference(n_reads)
-	# map_reads(reference_path)
-		# note proportion of reads mapped
-	# assess_coverage(reference_len)
 	trim()
 	assemble(normalise())
 	choose_assembly()
-		# note proportion of reads mapped
 	remap_reads()
 	report()
 
