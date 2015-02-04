@@ -8,6 +8,8 @@
 # | use khmer for deinterleaving (split-paired-reads.py)
 # | add minimum similarity threshold for reference selection
 # | mauve/nucmer integration for when a contiguous assembly is unavailable
+# | parellelise normalisation and assembly for speed
+# | refactor main method
 # | improve command line interface
 # | check exit code of every call to os.system?
 # | better command line arguments
@@ -40,16 +42,18 @@ from Bio.Blast.Applications import NcbiblastnCommandline
 def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
 	print('Identifying input... ')
 	fastqs = {'f':[], 'r':[]}
-	for fastq in os.listdir(paths['pipe'] + '/input/'):
+	for fastq in os.listdir(paths['in']):
 		if fastq.endswith('.fastq') or fastq.endswith('.fastq'):
 			if fwd_reads_sig in fastq:
-				fastqs['f'].append(paths['pipe'] + '/input/' + fastq)
+				fastqs['f'].append(paths['in'] + '/' + fastq)
 			elif rev_reads_sig in fastq:
-				fastqs['r'].append(paths['pipe'] + '/input/' + fastq)
+				fastqs['r'].append(paths['in'] + '/' + fastq)
 	fastq_pairs = zip(fastqs['f'], fastqs['r'])
 	fastq_pairs = {os.path.splitext(p[0].replace(fwd_reads_sig,''))[0]: p for p in fastq_pairs}
 	if not fastq_pairs:
 		sys.exit('Error reading paired FASTQs')
+	# for fastq_pair in fastq_pairs.val:
+	# 	print(fastq_pair)
 	return fastqs, fastq_pairs # return list of filenames, tuples of tuples of filename pairs
 	
 def merge_fastq_pairs(fastqs, paths, i=1):
@@ -94,13 +98,13 @@ def blast_references(paths, threads, i=1):
 	query = paths['out'] + '/sample/' + str(i) + '.sample.fasta',
 	db = paths['pipe'] + '/res/hcv_db/db.fasta',
 	out = paths['out'] + '/blast/' + str(i) + '.blast.tsv',
-	evalue = 1e-10,
+	evalue = 1e-4,
 	outfmt = 7,
 	num_alignments = 1,
 	num_threads = threads)
 	cmd_blastn()
 
-def choose_reference(n_reads, paths, threads, i=1):
+def choose_reference(paths, i=1):
 	print('Choosing reference sequence...')
 	accession_freqs = {}
 	with open(paths['out'] + '/blast/' + str(i) + '.blast.tsv', 'r') as blast_out:
@@ -110,15 +114,23 @@ def choose_reference(n_reads, paths, threads, i=1):
 				if accession in accession_freqs.keys():
 					accession_freqs[accession] += 1
 				else: accession_freqs[accession] = 1
-	best_accession = max(accession_freqs, key=accession_freqs.get)
-	
-	print('\tExtracting ' + best_accession + '...')
+	if accession_freqs:
+		reference_found = True
+		top_accession = max(accession_freqs, key=accession_freqs.get)
+	else:
+		reference_found = False
+		top_accession = None
+		print('\t WARNING: failed to identify a similar reference sequence')
+	return reference_found, top_accession
+
+def extract_reference(top_accession, paths, i=1):
+	print('\tExtracting ' + top_accession + '...')
 	reference = ''
 	with open(paths['pipe'] + '/res/hcv_db/db.fasta', 'r') as references_fa:
 		inside_best_reference = False
 		for line in references_fa:
 			if line.startswith('>'):
-				if best_accession in line:
+				if top_accession in line:
 					inside_best_reference = True
 				else: inside_best_reference = False
 			elif inside_best_reference:
@@ -126,8 +138,8 @@ def choose_reference(n_reads, paths, threads, i=1):
 	reference_len = len(reference)
 	reference_fa_path = paths['out'] + '/ref/' + str(i) + '.ref.fasta'
 	with open(reference_fa_path, 'w') as reference_fa:
-		reference_fa.write('>' + best_accession + '\n' + reference)
-	return best_accession, reference_fa_path,  reference_len
+		reference_fa.write('>' + top_accession + '\n' + reference)
+	return reference_fa_path, reference_len
 
 def genotype(n_reads, paths, i=1):
 	genotype_freqs = {}
@@ -138,6 +150,7 @@ def genotype(n_reads, paths, i=1):
 				if genotype in genotype_freqs.keys():
 					genotype_freqs[genotype] += 1
 				else: genotype_freqs[genotype] = 1
+	top_genotype = max(genotype_freqs, key=genotype_freqs.get) if genotype_freqs else None
 	genotype_props = {k: genotype_freqs[k]/n_reads*100 for k in genotype_freqs.keys()}
 	genotype_props_pc = {k: round(genotype_freqs[k]/n_reads*1e4, 2) for k in genotype_freqs.keys()}
 	genotype_props_pc_sorted = []
@@ -148,6 +161,7 @@ def genotype(n_reads, paths, i=1):
 	with open(paths['out'] + '/blast/' + str(i) + '.genotypes.txt', 'w') as genotypes_file:
 		for item in genotype_props_pc_sorted:
 			 genotypes_file.write(item + '\n')
+	return top_genotype
 
 def map_reads(reference_fa_path, paths, threads, i=1):
 	print('Aligning with Segemehl... ')
@@ -252,7 +266,6 @@ def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, paths, threads, i=1)
 	else:
 		asm_perms = [{'k':p['k'],'c':p['c'],'uc':uc} for p in norm_perms for uc in [0]]
 	for asm_perm in asm_perms:
-		print('\tSPAdes started... ', end='')
 		k, c, uc = str(asm_perm['k']), str(asm_perm['c']), str(asm_perm['uc'])
 		norm_path_prefix = paths['out'] + '/norm/' + str(i) + '.norm_k' + k + 'c' + c		
 		asm_path = paths['out'] + '/asm/' + str(i) + '.norm_k' + k + 'c' + c + '.asm_k' + asm_k_list + '.uc' + uc
@@ -261,20 +274,22 @@ def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, paths, threads, i=1)
 		+ '--pe1-1 ' + norm_path_prefix + '.r1_pe.fastq '
 		+ '--pe1-2 ' + norm_path_prefix + '.r2_pe.fastq '
 		+ '--s1 ' + norm_path_prefix + '.se.fastq '
-		+ '-o ' + asm_path) # restore to 		+ '-o ' + asm_path + ' --careful')
+		+ '-o ' + asm_path + ' --careful')
 		if asm_perm['uc']:
 			cmd_asm += ' --untrusted-contigs ' + paths['out'] + '/ref/' + str(i) + '.ref.fasta'
 		cmd_asm = envoy.run(cmd_asm)
 		# print(cmd_asm.std_out, cmd_asm.std_err)
-		print('Completed (k = ' + asm_k_list + ')') if cmd_asm.status_code == 0 else sys.exit('ERROR')
+		print('\tSPAdes completed (k=' + asm_k_list + ')') if cmd_asm.status_code == 0 else sys.exit('ERROR')
 
-def compare_assemblies(paths, threads, i=1):
+def evaluate_assemblies(reference_found, paths, threads, i=1):
 	print('Comparing assemblies... ')
-	asm_dirs = [paths['out'] + '/asm/' + dir + '/contigs.fasta' for dir in os.listdir(paths['out']
-	+ '/asm') if not dir.startswith('.')]
-	os.system('quast.py ' + ' '.join(asm_dirs) + ' -R ' + paths['out'] + '/ref/' + str(i)
-	+ '.ref.fasta -o ' + paths['out'] + '/eval/' + str(i) + ' --threads ' + str(threads)
-	+ '&> /dev/null')
+	asm_dirs = [paths['out'] + '/asm/' + dir + '/contigs.fasta' for dir in os.listdir(paths['out'] + '/asm') if not dir.startswith('.')]
+	eval_cmd = ('quast.py ' + ' '.join(asm_dirs) + ' -o ' + paths['out'] + '/eval/' + str(i)
+	+ ' --threads ' + str(threads))
+	if reference_found:
+		eval_cmd += ' -R ' + paths['out'] + '/ref/' + str(i) + '.ref.fasta'
+	eval_cmd += ' &> /dev/null'
+	os.system(eval_cmd)
 
 def remap_reads():
 	pass
@@ -311,29 +326,34 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
 			n_reads = count_reads(paths, i)
 			sample_reads(n_reads, paths, i)
 			blast_references(paths, threads, i)
-			reference_accession, reference_path, reference_len = choose_reference(n_reads, paths, threads, i)
-			genotype(n_reads, paths, i)
+			reference_found, top_accession = choose_reference(paths, i)
+			if reference_found:
+				reference_fa_path, reference_len = extract_reference(top_accession, paths, i)
+				top_genotype = genotype(n_reads, paths, i)
+				if top_genotype != '3a':
+					print('Genotype is not 3a. Skipping')
+					continue
 			# map_reads()
 			# assess_coverage()
 			trim(paths, i)
 			assemble(normalise(norm_k_list, norm_c_list, paths, i), asm_k_list, asm_untrusted_contigs, paths, threads, i)
-			compare_assemblies(paths, threads, i)
+			evaluate_assemblies(reference_found, paths, threads, i)
 			remap_reads()
-			# combine_results()
 		report(paths, i)
 	else:
 		merge_fastq_pairs(fastqs. paths)
 		n_reads = count_reads(paths)
 		sample_reads(n_reads, paths)
 		blast_references(paths, threads)
-		reference_accession, reference_path, reference_len = choose_reference(n_reads, paths, threads)
+		reference_found, top_accession = choose_reference(paths)
+		reference_fa_path, reference_len = extract_reference(top_accession, paths)
 		genotype(n_reads, paths)
 		# map_reads()
 		# assess_coverage()
 		trim(paths)
 		assemble(normalise(norm_k_list, norm_c_list, paths), asm_k_list, asm_untrusted_contigs, paths, threads)
-		compare_assemblies(paths, threads)
+		evaluate_assemblies(reference_found, paths, threads)
 		remap_reads()
-		report()
+		report(paths)
 
 argh.dispatch_command(main)
