@@ -6,13 +6,15 @@
 
 # TODO
 # | use khmer for deinterleaving (split-paired-reads.py)
+# | sort out assess_coverage() (currently disused)
 # | add minimum similarity threshold for reference selection
 # | mauve/nucmer integration for when a contiguous assembly is unavailable
 # | parellelise normalisation and assembly for speed
-# | refactor main method
+# | report on trimming, %remapped
+# | increase khmer table size
 # | improve command line interface
 # | check exit code of every call to os.system?
-# | better command line arguments
+# | refactor main method
 # | pep8
 
 # DEPENDENCIES
@@ -259,9 +261,9 @@ def normalise(norm_k_list, norm_c_list, paths, i=1):
 		print('\tKhmer completed (k=' + k + ', c=' + c + ')') if cmd_norm == 0 else sys.exit('FAIL')
 	return norm_perms
 
-def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, paths, threads, i=1):
+def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, reference_found, paths, threads, i=1):
 	print('Assembling... ')
-	if asm_untrusted_contigs:
+	if reference_found and asm_untrusted_contigs:
 		asm_perms = [{'k':p['k'],'c':p['c'],'uc':uc} for p in norm_perms for uc in [1, 0]]
 	else:
 		asm_perms = [{'k':p['k'],'c':p['c'],'uc':uc} for p in norm_perms for uc in [0]]
@@ -278,7 +280,7 @@ def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, paths, threads, i=1)
 		if asm_perm['uc']:
 			cmd_asm += ' --untrusted-contigs ' + paths['out'] + '/ref/' + str(i) + '.ref.fasta'
 		cmd_asm = envoy.run(cmd_asm)
-		# print(cmd_asm.std_out, cmd_asm.std_err)
+		print(cmd_asm.std_out, cmd_asm.std_err)
 		print('\tSPAdes completed (k=' + asm_k_list + ')') if cmd_asm.status_code == 0 else sys.exit('ERROR')
 
 def evaluate_assemblies(reference_found, paths, threads, i=1):
@@ -295,7 +297,7 @@ def remap_reads():
 	pass
 
 def report(paths, i):
-	os.mkdir(paths['out'] + '/eval/summary/')
+	os.makedirs(paths['out'] + '/eval/summary/')
 	os.system('cp -R ' + paths['out'] + '/eval/' + str(i) + '/report.html ' + paths['out']
 	+ '/eval/' + str(i) + '/transposed_report.tsv ' + paths['out'] + '/eval/' + str(i)
 	+ '/report_html_aux ' + paths['out'] + '/eval/summary/')
@@ -308,7 +310,7 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
 		'pipe':os.path.dirname(os.path.realpath(__file__)),
 		'out':out_dir + '/run_' + str(int(time.time()))
 	}
-	os.mkdir(paths['out'])
+	os.makedirs(paths['out'])
 	os.mkdir(paths['out'] + '/merge/')
 	os.mkdir(paths['out'] + '/sample/')
 	os.mkdir(paths['out'] + '/blast/')
@@ -318,6 +320,7 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
 	os.mkdir(paths['out'] + '/norm/')
 	os.mkdir(paths['out'] + '/asm/')
 	os.mkdir(paths['out'] + '/remap/')
+	os.mkdir(paths['out'] + '/eval/')
 
 	fastqs, fastq_pairs = list_fastqs(fwd_reads_sig, rev_reads_sig, paths)
 	if multiple_samples:
@@ -336,7 +339,7 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
 			# map_reads()
 			# assess_coverage()
 			trim(paths, i)
-			assemble(normalise(norm_k_list, norm_c_list, paths, i), asm_k_list, asm_untrusted_contigs, paths, threads, i)
+			assemble(normalise(norm_k_list, norm_c_list, paths, i), asm_k_list, asm_untrusted_contigs, reference_found, paths, threads, i)
 			evaluate_assemblies(reference_found, paths, threads, i)
 			remap_reads()
 		report(paths, i)
@@ -351,7 +354,7 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
 		# map_reads()
 		# assess_coverage()
 		trim(paths)
-		assemble(normalise(norm_k_list, norm_c_list, paths), asm_k_list, asm_untrusted_contigs, paths, threads)
+		assemble(normalise(norm_k_list, norm_c_list, paths), asm_k_list, asm_untrusted_contigs, reference_found, paths, threads)
 		evaluate_assemblies(reference_found, paths, threads)
 		remap_reads()
 		report(paths)
