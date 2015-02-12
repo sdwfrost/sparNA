@@ -55,8 +55,7 @@ def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
                 fastqs['r'].append(paths['in'] + '/' + fastq)
     fastq_pairs = zip(fastqs['f'], fastqs['r'])
     fastq_pairs = {os.path.splitext(p[0].replace(fwd_reads_sig,''))[0]: p for p in fastq_pairs}
-    if not fastq_pairs:
-        sys.exit('Error reading paired FASTQs')
+    print('\tDone') if fastq_pairs else sys.exit('ERR_READS')
     return fastqs, fastq_pairs
     
 def import_reads(multiple_samples, fastqs, fastq_pair, paths, i=1):
@@ -84,6 +83,8 @@ def import_reads(multiple_samples, fastqs, fastq_pair, paths, i=1):
      '{path_out}/merge/{i}.raw.r2.fastq > {path_out}/merge/{i}.raw.r12.fastq'
      .format(**cmd_vars))
     cmd_import = os.system(cmd_import)
+    print('\tDone') if cmd_import == 0 else sys.exit('ERR_IMPORT')
+
 
 def count_reads(paths, i=1):
     print('Counting reads...')
@@ -92,6 +93,7 @@ def count_reads(paths, i=1):
             path_out=paths['out']))
     cmd_count = envoy.run(cmd_count)
     n_reads = int(cmd_count.std_out.replace(' ','').split('/')[0])/4
+    print('\tDone') if cmd_count.status_code == 0 else sys.exit('ERR_COUNT')
     return n_reads
 
 def sample_reads(n_reads, paths, i=1):
@@ -104,6 +106,7 @@ def sample_reads(n_reads, paths, i=1):
              path_out=paths['out'],
              n_reads_sample=n_reads_sample))
     cmd_sample = os.system(cmd_sample)
+    print('\tDone') if cmd_sample == 0 else sys.exit('ERR_SAMPLE')
     return n_reads_sample
 
 def blast_references(paths, threads, i=1):
@@ -120,6 +123,7 @@ def blast_references(paths, threads, i=1):
         out = paths['out'] + '/blast/' + str(i) + '.blast.tsv', 
         num_threads = threads)
     cmd_blastn()
+    print('\tDone')
 
 def choose_reference(paths, i=1):
     print('Choosing reference sequence...')
@@ -138,6 +142,7 @@ def choose_reference(paths, i=1):
         reference_found = False
         top_accession = None
         print('\tWARNING: failed to identify a similar reference sequence')
+    print('\tDone')
     return reference_found, top_accession
 
 def extract_reference(top_accession, paths, i=1):
@@ -156,9 +161,11 @@ def extract_reference(top_accession, paths, i=1):
     reference_path = paths['out'] + '/ref/' + str(i) + '.ref.fasta'
     with open(reference_path, 'w') as reference_fa:
         reference_fa.write('>' + top_accession + '\n' + reference)
+    print('\tDone')
     return reference_path, reference_len
 
 def genotype(n_reads, paths, i=1):
+    print('Genotyping...')
     genotype_freqs = {}
     with open(paths['out'] + '/blast/' + str(i) + '.blast.tsv', 'r') as blast_out:
         for line in blast_out:
@@ -178,6 +185,7 @@ def genotype(n_reads, paths, i=1):
     with open(paths['out'] + '/blast/' + str(i) + '.genotypes.txt', 'w') as genotypes_file:
         for item in genotype_props_pc_sorted:
              genotypes_file.write(item + '\n')
+    print('\tDone')
     return top_genotype
 
 def map_reads(reference_path, paths, threads, i=1):
@@ -188,7 +196,7 @@ def map_reads(reference_path, paths, threads, i=1):
      'path_out':paths['out'],
      'reference_path':reference_path,
      'threads':threads}
-    cmds_align = [
+    cmds_map = [
      '{path_pipe}/res/segemehl/segemehl.x -d {reference_path} -x {reference_path}.idx',
      '{path_pipe}/res/segemehl/segemehl.x -d {reference_path} -x {reference_path}.idx -q '
      '{path_out}/merge/{i}.raw.r12.fastq --threads {threads} -A 60 > '
@@ -201,8 +209,9 @@ def map_reads(reference_path, paths, threads, i=1):
      'samtools mpileup -ud 1000 -f {reference_path} /map/{i}.segemehl_mapped.bam | '
      'bcftools call -c | vcfutils.pl vcf2fq | seqtk seq -a - | fasta_formatter -o '
      '{path_out}/map/{i}.consensus.fasta']
-    for cmd_align in cmds_align:
-        os.system(cmd_align.format(**cmd_vars))
+    for i, cmd_map in enumerate(cmds_map):
+        cmd_map = os.system(cmd_map.format(**cmd_vars))
+        print('\tDone (step ' + str(i) + ')') if cmd_map == 0 else sys.exit('ERR_MAP')
 
 def assess_coverage(reference_len, paths, i=1):
     print('Identifying low coverage regions... ')
@@ -232,14 +241,15 @@ def assess_coverage(reference_len, paths, i=1):
             uncovered_region = 1
         last_uncovered_site = uncovered_site
 
-    print('Uncovered sites: ' + str(len(uncovered_sites)))
-    print('Uncovered regions: ' + str(len(uncovered_regions)))
+    print('\tUncovered sites: ' + str(len(uncovered_sites)))
+    print('\tUncovered regions: ' + str(len(uncovered_regions)))
     if not uncovered_sites:
-        print('All reference bases covered!')
+        print('\tAll reference bases covered!')
     elif len(uncovered_sites) < (1-min_coverage)*reference_len:
-        print('Reference coverage safely above threshold')
+        print('\tReference coverage safely above threshold')
     else:
-        print('Reference coverage below threshold')
+        print('\tReference coverage below threshold')
+    print('\tDone')
 
 def trim(paths, i=1):
     print('Trimming... ')
