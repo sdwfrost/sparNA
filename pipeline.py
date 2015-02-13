@@ -266,7 +266,7 @@ def trim(paths, i=1):
      'cat {path_out}/trim/{i}.trim.r1_se.fastq {path_out}/trim/{i}.trim.r2_se.fastq > '
      '{path_out}/trim/{i}.trim.se.fastq '
      '&& interleave-reads.py {path_out}/trim/{i}.trim.r1_pe.fastq '
-     '{path_out}/trim/{i}.trim.r2_pe.fastq > {path_out}/trim/{i}.trim.r12_pe.fastq'
+     '{path_out}/trim/{i}.trim.r2_pe.fastq 2> /dev/null > {path_out}/trim/{i}.trim.r12_pe.fastq'
      .format(i=str(i), 
              path_pipe=paths['pipe'],
              path_out=paths['out']))
