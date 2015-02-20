@@ -5,12 +5,13 @@
 # Please seek permission prior to use or distribution
 
 # TODO
-# | implement gnu parallel
+# | sample a larger number of reads
+# | make virus agnostic
+# | parallelise normalisation, assembly?
 # | include reference_path inside paths?
 # | if no reads are aligned in the blast step, try blasting every single read
 # | itop appeasing Insanely Bad Format - keep reads interleaved except as required
 # | use khmer for deinterleaving (split-paired-reads.py)
-# | sort out assess_coverage() (currently disused)
 # | add minimum similarity threshold for reference selection
 # | mauve/nucmer integration for when a contiguous assembly is unavailable
 # | parellelise normalisation and assembly for speed
@@ -197,7 +198,6 @@ def map_reads(reference_path, paths, threads, i=1):
      'reference_path':reference_path,
      'threads':threads}
     cmds_map = [
-     'open {path_out}/map/',
      'bwa index {reference_path} &> /dev/null',
      'bwa mem -v 0 -p -t {threads} {reference_path} {path_out}/merge/{i}.raw.r12.fastq 2> /dev/null > {path_out}/map/{i}.mapped.sam',
      # '{path_pipe}/res/segemehl/segemehl.x -d {reference_path} -x {reference_path}.idx &> /dev/null',
@@ -243,7 +243,7 @@ def assess_coverage(reference_len, paths, i=1):
     if not uncovered_sites:
         print('\tAll reference bases covered!')
     elif len(uncovered_sites) < (1-min_coverage)*reference_len:
-        print('\tReference coverage safely above threshold')
+        print('\tReference coverage exceeds threshold')
     else:
         print('\tReference coverage below threshold')
     print('\tDone')
@@ -329,40 +329,45 @@ def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, reference_found, pat
         # print(cmd_asm.std_out, cmd_asm.std_err)
         print('\tDone (k=' + asm_k_list + ')') if cmd_asm.status_code == 0 else sys.exit('ERR_ASM')
 
-def evaluate_assemblies(reference_found, paths, threads, i=1):
+def evaluate_sample_assemblies(reference_found, paths, threads, i=1):
     print('Comparing assemblies... ')
     asm_dirs = (
-     [paths['out'] + '/asm/' + dir + '/contigs.fasta' for dir in os.listdir(paths['out'] + '/asm')
-     if not dir.startswith('.')])
+     [paths['out'] + '/asm/' + dir + '/contigs.fasta' for dir in
+     filter(lambda d: d.startswith(str(i)), os.listdir(paths['out'] + '/asm'))])
+    print(asm_dirs)
     cmd_vars = {
      'i':str(i),
      'asm_dirs':' '.join(asm_dirs),
      'path_out':paths['out'],
      'threads':threads}
-    eval_cmd = ('quast.py {asm_dirs} -o {path_out}/eval/{i} --threads {threads}'.format(**cmd_vars))
+    cmd_eval = ('quast.py {asm_dirs} -o {path_out}/eval/{i} --threads {threads}'.format(**cmd_vars))
     if reference_found:
-        eval_cmd += ' -R {path_out}/ref/{i}.ref.fasta'.format(**cmd_vars)
-    eval_cmd += ' &> /dev/null'
-    os.system(eval_cmd)
+        cmd_eval += ' -R {path_out}/ref/{i}.ref.fasta'.format(**cmd_vars)
+    cmd_eval += ' &> /dev/null'
+    cmd_eval = os.system(cmd_eval)
+    print('\tDone') if cmd_eval == 0 else sys.exit('ERR_EVAL')
 
 def remap_reads():
     pass
 
-def report(paths, i):
+def evaluate_run_assemblies(paths, i):
     os.makedirs(paths['out'] + '/eval/summary/')
     cmd_vars = {
      'i':str(i),
      'path_out':paths['out']}
     cmd_report = (
-     'cp -R {path_out}/eval/{i}/report.html {path_out}/eval/{i}/transposed_report.tsv '
-     '{path_out}/eval/{i}/report_html_aux {path_out}/eval/sumary/'.format(**cmd_vars))
+     'cp {path_out}/eval/{i}/report.html {path_out}/eval/{i}/transposed_report.tsv '
+     '{path_out}/eval/summary/ && cp -R {path_out}/eval/{i}/report_html_aux '
+     '{path_out}/eval/summary/'.format(**cmd_vars))
     cmd_report = os.system(cmd_report)
     print('\tQUAST report: ' + paths['out'] + '/eval/summary/')
 
 def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm_k_list=None,
     norm_c_list=None, asm_k_list=None, asm_untrusted_contigs=False, multiple_samples=False,
-    threads=1):
-    print('Using ' + str(threads) + ' threads...')
+    hcv=False, threads=1):
+    print('Run type:', end=' ')
+    print('virus agnostic') if not hcv else print('HepC', end=', ')
+    print(str(threads) + ' threads')
     paths = {
      'in':in_dir,
      'pipe':os.path.dirname(os.path.realpath(__file__)),
@@ -375,9 +380,10 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
     for i, fastq_pair in enumerate(fastq_pairs, start=1):
         import_reads(multiple_samples, fastqs, fastq_pairs[fastq_pair], paths, i)
         n_reads = count_reads(paths, i)
-        sample_reads(n_reads, paths, i)
-        blast_references(paths, threads, i)
-        reference_found, top_accession = choose_reference(paths, i)
+        if hcv:
+            sample_reads(n_reads, paths, i)
+            blast_references(paths, threads, i)
+            reference_found, top_accession = choose_reference(paths, i)
         if reference_found:
             reference_path, reference_len = extract_reference(top_accession, paths, i)
             top_genotype = genotype(n_reads, paths, i)
@@ -386,8 +392,7 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
         trim(paths, i)
         assemble(normalise(norm_k_list, norm_c_list, paths, i), asm_k_list, asm_untrusted_contigs,
                  reference_found, paths, threads, i)
-        evaluate_assemblies(reference_found, paths, threads, i)
-        remap_reads()
-    report(paths, i)
+        evaluate_sample_assemblies(reference_found, paths, threads, i)        
+    evaluate_run_assemblies(paths, i)
 
 argh.dispatch_command(main)
