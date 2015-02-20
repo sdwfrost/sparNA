@@ -388,8 +388,8 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
     for dir in job_dirs:
         os.makedirs(paths['out'] + '/' + dir)
 
-    fastqs, fastq_pairs = list_fastqs(fwd_reads_sig, rev_reads_sig, paths)
-    for i, fastq_pair in enumerate(fastq_pairs, start=1):
+    state['fastqs'], state['fastq_pairs'] = list_fastqs(fwd_reads_sig, rev_reads_sig, paths)
+    for i, fastq_pair in enumerate(state['fastq_pairs'], start=1):
         import_reads(multiple_samples, fastqs, fastq_pairs[fastq_pair], paths, i)
         state['n_reads'] = count_reads(paths, i)
         if hcv:
