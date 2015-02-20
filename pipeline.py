@@ -10,7 +10,7 @@
 # | parallelise normalisation, assembly?
 # | include reference_path inside paths?
 # | if no reads are aligned in the blast step, try blasting every single read
-# | itop appeasing Insanely Bad Format - keep reads interleaved except as required
+# | stop appeasing Insanely Bad Format - keep reads interleaved except as required
 # | use khmer for deinterleaving (split-paired-reads.py)
 # | add minimum similarity threshold for reference selection
 # | mauve/nucmer integration for when a contiguous assembly is unavailable
@@ -98,8 +98,8 @@ def count_reads(paths, i=1):
     return n_reads
 
 def sample_reads(n_reads, paths, i=1):
-    print('Sampling reads...')
-    n_reads_sample = n_reads/100
+    n_reads_sample = 1e4 if n_reads >= 1e4 else n_reads
+    print('Sampling ' + str(n_reads_sample) + ' reads...')
     cmd_sample = (
      'cat {path_out}/merge/{i}.raw.r12.fastq | seqtk sample - '
      '{n_reads_sample} | seqtk seq -a - > {path_out}/sample/{i}.sample.fasta'
@@ -165,8 +165,9 @@ def extract_reference(top_accession, paths, i=1):
     print('\tDone')
     return reference_path, reference_len
 
-def genotype(n_reads, paths, i=1):
+def genotype(n_reads, n_reads_sample, paths, i=1):
     print('Genotyping...')
+    prop_reads_sample = n_reads_sample/n_reads
     genotype_freqs = {}
     with open(paths['out'] + '/blast/' + str(i) + '.blast.tsv', 'r') as blast_out:
         for line in blast_out:
@@ -177,7 +178,7 @@ def genotype(n_reads, paths, i=1):
                 else: genotype_freqs[genotype] = 1
     top_genotype = max(genotype_freqs, key=genotype_freqs.get) if genotype_freqs else None
     genotype_props = {k: genotype_freqs[k]/n_reads*100 for k in genotype_freqs.keys()}
-    genotype_props_pc = {k: round(genotype_freqs[k]/n_reads*1e4, 2) for k in genotype_freqs.keys()}
+    genotype_props_pc = {k: round(genotype_freqs[k]/n_reads_sample*100, 3) for k in genotype_freqs.keys()}
     genotype_props_pc_sorted = []
     for genotype, proportion in reversed(sorted(genotype_props_pc.items(), key=lambda(k,v):(v,k))):
         record = (genotype + ': ' + str(proportion) + '% (' + str(genotype_freqs[genotype]) + ')')
@@ -364,7 +365,7 @@ def evaluate_run_assemblies(paths, i):
 
 def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm_k_list=None,
     norm_c_list=None, asm_k_list=None, asm_untrusted_contigs=False, multiple_samples=False,
-    hcv=False, threads=1):
+    interleaved=False, hcv=False, threads=1):
     print('Run type:', end=' ')
     print('virus agnostic') if not hcv else print('HepC', end=', ')
     print(str(threads) + ' threads')
@@ -381,12 +382,12 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
         import_reads(multiple_samples, fastqs, fastq_pairs[fastq_pair], paths, i)
         n_reads = count_reads(paths, i)
         if hcv:
-            sample_reads(n_reads, paths, i)
+            n_reads_sample = sample_reads(n_reads, paths, i)
             blast_references(paths, threads, i)
             reference_found, top_accession = choose_reference(paths, i)
         if reference_found:
             reference_path, reference_len = extract_reference(top_accession, paths, i)
-            top_genotype = genotype(n_reads, paths, i)
+            top_genotype = genotype(n_reads, n_reads_sample, paths, i)
             map_reads(reference_path, paths, threads, i)
             assess_coverage(reference_len, paths, i)
         trim(paths, i)
