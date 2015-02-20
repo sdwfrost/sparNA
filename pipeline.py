@@ -5,6 +5,7 @@
 # Please seek permission prior to use or distribution
 
 # TODO
+# | implement gnu parallel
 # | include reference_path inside paths?
 # | if no reads are aligned in the blast step, try blasting every single read
 # | itop appeasing Insanely Bad Format - keep reads interleaved except as required
@@ -23,7 +24,7 @@
 # | python packages:
 # |    argh, biopython, envoy, khmer
 # | others, expected inside $PATH:
-# |    blast, samtools, seqtk, spades, quast
+# |    blast, samtools, seqtk, spades, quast, parallel (GNU)
 # | others, bundled inside res/ directory:
 # |    trimmomatic, fastq_deinterleave
 # | others, bundled and requiring compilation: segemehl
@@ -32,7 +33,7 @@
 # Input fastq filenames should have an extension and a signature to allow identification of forward and reverse reads
 
 # min_cov
-# segemehl_sensitivity_pc
+# segemehl -A -D -E values
 # min_depth
 
 from __future__ import division, print_function
@@ -59,7 +60,7 @@ def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
     return fastqs, fastq_pairs
     
 def import_reads(multiple_samples, fastqs, fastq_pair, paths, i=1):
-    print('Importing reads... ')
+    print('Importing reads... (SAMPLE {0})'.format(i))
     cmd_vars = {
      'i':str(i),
      'fq_pair_f':fastq_pair[0],
@@ -76,11 +77,10 @@ def import_reads(multiple_samples, fastqs, fastq_pair, paths, i=1):
         cmd_import = (
          'cat {fastqs_f} > {path_out}/merge/{i}.raw.r1.fastq && '
          'cat {fastqs_r} > {path_out}/merge/{i}.raw.r2.fastq && '
-         'interleave-reads.py {path_out}/merge/{i}.raw.r1.fastq '
          .format(**cmd_vars))
     cmd_import += (
      'interleave-reads.py {path_out}/merge/{i}.raw.r1.fastq '
-     '{path_out}/merge/{i}.raw.r2.fastq > {path_out}/merge/{i}.raw.r12.fastq'
+     '{path_out}/merge/{i}.raw.r2.fastq 2> /dev/null > {path_out}/merge/{i}.raw.r12.fastq'
      .format(**cmd_vars))
     cmd_import = os.system(cmd_import)
     print('\tDone') if cmd_import == 0 else sys.exit('ERR_IMPORT')
@@ -111,7 +111,7 @@ def sample_reads(n_reads, paths, i=1):
 
 def blast_references(paths, threads, i=1):
     print('BLASTing reference sequences...')
-    if not os.path.exists(paths['pipe'] + '/res/hcv_db/db.nhr'):
+    if not os.path.exists(paths['pipe'] + '/res/hcv_db/db.fasta.nhr'):
         cmd_blastn_index = (
          'makeblastdb -dbtype nucl -input_type fasta '
          '-in {path_pipe}/res/hcv_db/db.fasta -title db'
@@ -146,7 +146,7 @@ def choose_reference(paths, i=1):
     return reference_found, top_accession
 
 def extract_reference(top_accession, paths, i=1):
-    print('\tExtracting ' + top_accession + '...')
+    print('Extracting reference ' + top_accession + '...')
     reference = ''
     with open(paths['pipe'] + '/res/hcv_db/db.fasta', 'r') as references_fa:
         inside_best_reference = False
@@ -189,7 +189,7 @@ def genotype(n_reads, paths, i=1):
     return top_genotype
 
 def map_reads(reference_path, paths, threads, i=1):
-    print('Aligning with Segemehl... ')
+    print('Aligning... ')
     cmd_vars = {
      'i':str(i),
      'path_pipe':paths['pipe'],
@@ -197,21 +197,18 @@ def map_reads(reference_path, paths, threads, i=1):
      'reference_path':reference_path,
      'threads':threads}
     cmds_map = [
-     '{path_pipe}/res/segemehl/segemehl.x -d {reference_path} -x {reference_path}.idx',
-     '{path_pipe}/res/segemehl/segemehl.x -d {reference_path} -x {reference_path}.idx -q '
-     '{path_out}/merge/{i}.raw.r12.fastq --threads {threads} -A 60 > '
-     '{path_out}/map/{i}.segemehl_mapped.sam',
-     'samtools view -bS {path_out}/map/{i}.segemehl_mapped.sam | samtools sort - '
-     '{path_out}/map/{i}.segemehl_mapped',
-     'samtools index {path_out}/map/{i}.segemehl_mapped.bam',
-     'samtools mpileup -d 1000 -f {reference_path} {path_out}/map/{i}.segemehl_mapped.bam > '
-     '{path_out}/map/{i}.segemehl_mapped.pile',
-     'samtools mpileup -ud 1000 -f {reference_path} /map/{i}.segemehl_mapped.bam | '
-     'bcftools call -c | vcfutils.pl vcf2fq | seqtk seq -a - | fasta_formatter -o '
-     '{path_out}/map/{i}.consensus.fasta']
-    for i, cmd_map in enumerate(cmds_map):
-        cmd_map = os.system(cmd_map.format(**cmd_vars))
-        print('\tDone (step ' + str(i) + ')') if cmd_map == 0 else sys.exit('ERR_MAP')
+     'open {path_out}/map/',
+     'bwa index {reference_path} &> /dev/null',
+     'bwa mem -v 0 -p -t {threads} {reference_path} {path_out}/merge/{i}.raw.r12.fastq 2> /dev/null > {path_out}/map/{i}.mapped.sam',
+     # '{path_pipe}/res/segemehl/segemehl.x -d {reference_path} -x {reference_path}.idx &> /dev/null',
+     # '{path_pipe}/res/segemehl/segemehl.x -d {reference_path} -x {reference_path}.idx -q {path_out}/merge/{i}.raw.r12.fastq --threads {threads} -A 60 2> /dev/null > {path_out}/map/{i}.mapped.sam',
+     'samtools view -bS {path_out}/map/{i}.mapped.sam | samtools sort - {path_out}/map/{i}.mapped',
+     'samtools index {path_out}/map/{i}.mapped.bam',
+     'samtools mpileup -d 1000 -f {reference_path} {path_out}/map/{i}.mapped.bam 2> /dev/null > {path_out}/map/{i}.mapped.pile',
+     'samtools mpileup -ud 1000 -f {reference_path} {path_out}/map/{i}.mapped.bam 2> /dev/null | bcftools call -c | vcfutils.pl vcf2fq | seqtk seq -a - | fasta_formatter -o {path_out}/map/{i}.consensus.fasta']
+    for j, cmd in enumerate(cmds_map, start=1):
+        cmd_map = os.system(cmd.format(**cmd_vars))
+        print('\tDone (' + cmd.split(' ')[0] + ')') if cmd_map == 0 else sys.exit('ERR_MAP')
 
 def assess_coverage(reference_len, paths, i=1):
     print('Identifying low coverage regions... ')
@@ -219,7 +216,7 @@ def assess_coverage(reference_len, paths, i=1):
     min_coverage = 0.9
     depths = {}
     uncovered_sites = []
-    with open(paths['out'] + '/map/' + str(i) + '.segemehl_mapped.pile', 'r') as pileup:
+    with open(paths['out'] + '/map/' + str(i) + '.mapped.pile', 'r') as pileup:
         bases_covered = 0
         for line in pileup:
             site = int(line.split('\t')[1])
@@ -271,10 +268,9 @@ def trim(paths, i=1):
              path_pipe=paths['pipe'],
              path_out=paths['out']))
     cmd_trim = envoy.run(cmd_trim)
-    print(cmd_trim.std_err)
     cmd_trim_stats = ''.join(cmd_trim.std_err).split('\n')[25]
     cmd_trim_pp = os.system(cmd_trim_pp)
-    print('\tDone') if cmd_trim.status_code == 0 else sys.exit('ERR_TRIM')
+    print('\tDone') if cmd_trim.status_code == 0 and cmd_trim_pp == 0 else sys.exit('ERR_TRIM')
 
 def normalise(norm_k_list, norm_c_list, paths, i=1):
     print('Normalising... ')
@@ -285,10 +281,10 @@ def normalise(norm_k_list, norm_c_list, paths, i=1):
         cmd_norm = (
          'normalize-by-median.py -C {c} -k {k} -N 1 -x 1e9 -p '
          '{path_out}/trim/{i}.trim.r12_pe.fastq '
-         '-o {path_out}/norm/{i}.norm_k{k}c{c}.r12_pe.fastq '
+         '-o {path_out}/norm/{i}.norm_k{k}c{c}.r12_pe.fastq &> /dev/null '
          '&& normalize-by-median.py -C {c} -k {k} -N 1 -x 1e9 '
          '{path_out}/trim/{i}.trim.se.fastq '
-         '-o {path_out}/norm/{i}.norm_k{k}c{c}.se.fastq '
+         '-o {path_out}/norm/{i}.norm_k{k}c{c}.se.fastq &> /dev/null '
          '&& {path_pipe}/res/fastq_deinterleave '
          '{path_out}/norm/{i}.norm_k{k}c{c}.r12_pe.fastq '
          '{path_out}/norm/{i}.norm_k{k}c{c}.r1_pe.fastq '
@@ -330,7 +326,7 @@ def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, reference_found, pat
         if asm_perm['uc']:
             cmd_asm += ' --untrusted-contigs ' + paths['out'] + '/ref/' + str(i) + '.ref.fasta'
         cmd_asm = envoy.run(cmd_asm)
-        print(cmd_asm.std_out, cmd_asm.std_err)
+        # print(cmd_asm.std_out, cmd_asm.std_err)
         print('\tDone (k=' + asm_k_list + ')') if cmd_asm.status_code == 0 else sys.exit('ERR_ASM')
 
 def evaluate_assemblies(reference_found, paths, threads, i=1):
@@ -366,6 +362,7 @@ def report(paths, i):
 def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm_k_list=None,
     norm_c_list=None, asm_k_list=None, asm_untrusted_contigs=False, multiple_samples=False,
     threads=1):
+    print('Using ' + str(threads) + ' threads...')
     paths = {
      'in':in_dir,
      'pipe':os.path.dirname(os.path.realpath(__file__)),
@@ -384,7 +381,7 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
         if reference_found:
             reference_path, reference_len = extract_reference(top_accession, paths, i)
             top_genotype = genotype(n_reads, paths, i)
-            map_reads(reference_path, paths, i)
+            map_reads(reference_path, paths, threads, i)
             assess_coverage(reference_len, paths, i)
         trim(paths, i)
         assemble(normalise(norm_k_list, norm_c_list, paths, i), asm_k_list, asm_untrusted_contigs,
