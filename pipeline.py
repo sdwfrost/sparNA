@@ -5,10 +5,9 @@
 # Please seek permission prior to use or distribution
 
 # TODO
-# | sample a larger number of reads
 # | make virus agnostic
 # | parallelise normalisation, assembly?
-# | include reference_path inside paths?
+# | include ref_path inside paths?
 # | if no reads are aligned in the blast step, try blasting every single read
 # | stop appeasing Insanely Bad Format - keep reads interleaved except as required
 # | use khmer for deinterleaving (split-paired-reads.py)
@@ -99,7 +98,7 @@ def count_reads(paths, i=1):
 
 def sample_reads(n_reads, paths, i=1):
     n_reads_sample = 1e4 if n_reads >= 1e4 else n_reads
-    print('Sampling ' + str(n_reads_sample) + ' reads...')
+    print('Sampling ' + str(int(n_reads_sample)) + ' reads...')
     cmd_sample = (
      'cat {path_out}/merge/{i}.raw.r12.fastq | seqtk sample - '
      '{n_reads_sample} | seqtk seq -a - > {path_out}/sample/{i}.sample.fasta'
@@ -137,33 +136,33 @@ def choose_reference(paths, i=1):
                     accession_freqs[accession] += 1
                 else: accession_freqs[accession] = 1
     if accession_freqs:
-        reference_found = True
-        top_accession = max(accession_freqs, key=accession_freqs.get)
+        found_ref = True
+        top_ref_accession = max(accession_freqs, key=accession_freqs.get)
     else:
-        reference_found = False
-        top_accession = None
+        found_ref = False
+        top_ref_accession = None
         print('\tWARNING: failed to identify a similar reference sequence')
     print('\tDone')
-    return reference_found, top_accession
+    return found_ref, top_ref_accession
 
-def extract_reference(top_accession, paths, i=1):
-    print('Extracting reference ' + top_accession + '...')
+def extract_reference(top_ref_accession, paths, i=1):
+    print('Extracting reference ' + top_ref_accession + '...')
     reference = ''
     with open(paths['pipe'] + '/res/hcv_db/db.fasta', 'r') as references_fa:
         inside_best_reference = False
         for line in references_fa:
             if line.startswith('>'):
-                if top_accession in line:
+                if top_ref_accession in line:
                     inside_best_reference = True
                 else: inside_best_reference = False
             elif inside_best_reference:
                 reference += line.strip()
-    reference_len = len(reference)
-    reference_path = paths['out'] + '/ref/' + str(i) + '.ref.fasta'
-    with open(reference_path, 'w') as reference_fa:
-        reference_fa.write('>' + top_accession + '\n' + reference)
+    ref_len = len(reference)
+    ref_path = paths['out'] + '/ref/' + str(i) + '.ref.fasta'
+    with open(ref_path, 'w') as reference_fa:
+        reference_fa.write('>' + top_ref_accession + '\n' + reference)
     print('\tDone')
-    return reference_path, reference_len
+    return ref_path, ref_len
 
 def genotype(n_reads, n_reads_sample, paths, i=1):
     print('Genotyping...')
@@ -190,28 +189,28 @@ def genotype(n_reads, n_reads_sample, paths, i=1):
     print('\tDone')
     return top_genotype
 
-def map_reads(reference_path, paths, threads, i=1):
+def map_reads(ref_path, paths, threads, i=1):
     print('Aligning... ')
     cmd_vars = {
      'i':str(i),
      'path_pipe':paths['pipe'],
      'path_out':paths['out'],
-     'reference_path':reference_path,
+     'ref_path':ref_path,
      'threads':threads}
     cmds_map = [
-     'bwa index {reference_path} &> /dev/null',
-     'bwa mem -v 0 -p -t {threads} {reference_path} {path_out}/merge/{i}.raw.r12.fastq 2> /dev/null > {path_out}/map/{i}.mapped.sam',
-     # '{path_pipe}/res/segemehl/segemehl.x -d {reference_path} -x {reference_path}.idx &> /dev/null',
-     # '{path_pipe}/res/segemehl/segemehl.x -d {reference_path} -x {reference_path}.idx -q {path_out}/merge/{i}.raw.r12.fastq --threads {threads} -A 60 2> /dev/null > {path_out}/map/{i}.mapped.sam',
+     'bwa index {ref_path} &> /dev/null',
+     'bwa mem -v 0 -p -t {threads} {ref_path} {path_out}/merge/{i}.raw.r12.fastq 2> /dev/null > {path_out}/map/{i}.mapped.sam',
+     # '{path_pipe}/res/segemehl/segemehl.x -d {ref_path} -x {ref_path}.idx &> /dev/null',
+     # '{path_pipe}/res/segemehl/segemehl.x -d {ref_path} -x {ref_path}.idx -q {path_out}/merge/{i}.raw.r12.fastq --threads {threads} -A 60 2> /dev/null > {path_out}/map/{i}.mapped.sam',
      'samtools view -bS {path_out}/map/{i}.mapped.sam | samtools sort - {path_out}/map/{i}.mapped',
      'samtools index {path_out}/map/{i}.mapped.bam',
-     'samtools mpileup -d 1000 -f {reference_path} {path_out}/map/{i}.mapped.bam 2> /dev/null > {path_out}/map/{i}.mapped.pile',
-     'samtools mpileup -ud 1000 -f {reference_path} {path_out}/map/{i}.mapped.bam 2> /dev/null | bcftools call -c | vcfutils.pl vcf2fq | seqtk seq -a - | fasta_formatter -o {path_out}/map/{i}.consensus.fasta']
+     'samtools mpileup -d 1000 -f {ref_path} {path_out}/map/{i}.mapped.bam 2> /dev/null > {path_out}/map/{i}.mapped.pile',
+     'samtools mpileup -ud 1000 -f {ref_path} {path_out}/map/{i}.mapped.bam 2> /dev/null | bcftools call -c | vcfutils.pl vcf2fq | seqtk seq -a - | fasta_formatter -o {path_out}/map/{i}.consensus.fasta']
     for j, cmd in enumerate(cmds_map, start=1):
         cmd_map = os.system(cmd.format(**cmd_vars))
         print('\tDone (' + cmd.split(' ')[0] + ')') if cmd_map == 0 else sys.exit('ERR_MAP')
 
-def assess_coverage(reference_len, paths, i=1):
+def assess_coverage(ref_len, paths, i=1):
     print('Identifying low coverage regions... ')
     min_depth = 1
     min_coverage = 0.9
@@ -243,7 +242,7 @@ def assess_coverage(reference_len, paths, i=1):
     print('\tUncovered regions: ' + str(len(uncovered_regions)))
     if not uncovered_sites:
         print('\tAll reference bases covered!')
-    elif len(uncovered_sites) < (1-min_coverage)*reference_len:
+    elif len(uncovered_sites) < (1-min_coverage)*ref_len:
         print('\tReference coverage exceeds threshold')
     else:
         print('\tReference coverage below threshold')
@@ -302,9 +301,9 @@ def normalise(norm_k_list, norm_c_list, paths, i=1):
         print('\tDone (k=' + k + ', c=' + c + ')') if cmd_norm == 0 else sys.exit('ERR_NORM')
     return norm_perms
 
-def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, reference_found, paths, threads, i=1):
+def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, found_ref, paths, threads, i=1):
     print('Assembling... ')
-    if reference_found and asm_untrusted_contigs:
+    if found_ref and asm_untrusted_contigs:
         asm_perms = [{'k':p['k'],'c':p['c'],'uc':uc} for p in norm_perms for uc in [1, 0]]
     else:
         asm_perms = [{'k':p['k'],'c':p['c'],'uc':uc} for p in norm_perms for uc in [0]]
@@ -330,19 +329,19 @@ def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, reference_found, pat
         # print(cmd_asm.std_out, cmd_asm.std_err)
         print('\tDone (k=' + asm_k_list + ')') if cmd_asm.status_code == 0 else sys.exit('ERR_ASM')
 
-def evaluate_sample_assemblies(reference_found, paths, threads, i=1):
+def evaluate_sample_assemblies(found_ref, paths, threads, i=1):
     print('Comparing assemblies... ')
     asm_dirs = (
      [paths['out'] + '/asm/' + dir + '/contigs.fasta' for dir in
      filter(lambda d: d.startswith(str(i)), os.listdir(paths['out'] + '/asm'))])
-    print(asm_dirs)
+    # print(asm_dirs)
     cmd_vars = {
      'i':str(i),
      'asm_dirs':' '.join(asm_dirs),
      'path_out':paths['out'],
      'threads':threads}
     cmd_eval = ('quast.py {asm_dirs} -o {path_out}/eval/{i} --threads {threads}'.format(**cmd_vars))
-    if reference_found:
+    if found_ref:
         cmd_eval += ' -R {path_out}/ref/{i}.ref.fasta'.format(**cmd_vars)
     cmd_eval += ' &> /dev/null'
     cmd_eval = os.system(cmd_eval)
@@ -367,12 +366,24 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
     norm_c_list=None, asm_k_list=None, asm_untrusted_contigs=False, multiple_samples=False,
     interleaved=False, hcv=False, threads=1):
     print('Run type:', end=' ')
-    print('virus agnostic') if not hcv else print('HepC', end=', ')
+    print('virus agnostic', end=', ') if not hcv else print('HepC', end=', ')
     print(str(threads) + ' threads')
+   
     paths = {
      'in':in_dir,
      'pipe':os.path.dirname(os.path.realpath(__file__)),
      'out':out_dir + '/run_' + str(int(time.time()))}
+    state = {
+     'fastqs':None,
+     'fastq_pairs':None,
+     'n_reads':None,
+     'n_reads_sample':None,
+     'found_ref':None,
+     'top_ref_accession':None,
+     'top_genotype':None,
+     'ref_path':None,
+     'ref_len':None }
+    
     job_dirs = ['merge', 'sample', 'blast', 'ref', 'map', 'trim', 'norm', 'asm', 'remap', 'eval']
     for dir in job_dirs:
         os.makedirs(paths['out'] + '/' + dir)
@@ -380,20 +391,22 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
     fastqs, fastq_pairs = list_fastqs(fwd_reads_sig, rev_reads_sig, paths)
     for i, fastq_pair in enumerate(fastq_pairs, start=1):
         import_reads(multiple_samples, fastqs, fastq_pairs[fastq_pair], paths, i)
-        n_reads = count_reads(paths, i)
+        state['n_reads'] = count_reads(paths, i)
         if hcv:
-            n_reads_sample = sample_reads(n_reads, paths, i)
+            state['n_reads_sample'] = sample_reads(state['n_reads'], paths, i)
             blast_references(paths, threads, i)
-            reference_found, top_accession = choose_reference(paths, i)
-        if reference_found:
-            reference_path, reference_len = extract_reference(top_accession, paths, i)
-            top_genotype = genotype(n_reads, n_reads_sample, paths, i)
-            map_reads(reference_path, paths, threads, i)
-            assess_coverage(reference_len, paths, i)
+            state['found_ref'], state['top_ref_accession'] = choose_reference(paths, i)
+            if state['found_ref']:
+                state['ref_path'], state['ref_len'] = extract_reference(state['top_ref_accession'],
+                                                                        paths, i)
+                state['top_genotype'] = genotype(state['n_reads'], state['n_reads_sample'], paths,
+                                                 i)
+                map_reads(state['ref_path'], paths, threads, i)
+                assess_coverage(state['ref_len'], paths, i)
         trim(paths, i)
         assemble(normalise(norm_k_list, norm_c_list, paths, i), asm_k_list, asm_untrusted_contigs,
-                 reference_found, paths, threads, i)
-        evaluate_sample_assemblies(reference_found, paths, threads, i)        
+                 state['found_ref'], paths, threads, i)
+        evaluate_sample_assemblies(state['found_ref'], paths, threads, i)        
     evaluate_run_assemblies(paths, i)
 
 argh.dispatch_command(main)
