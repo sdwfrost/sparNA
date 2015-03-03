@@ -35,6 +35,7 @@ import sys
 import time
 import argh
 import envoy
+import subprocess
 from Bio import SeqIO
 from Bio.Blast.Applications import NcbiblastnCommandline
 
@@ -270,6 +271,7 @@ def normalise(norm_k_list, norm_c_list, paths, i=1):
     ks = norm_k_list.split(',')
     cs = norm_c_list.split(',')
     norm_perms = [{'k':k, 'c':c} for k in ks for c in cs]
+    print('>>norm_perms:', norm_perms)
     for norm_perm in norm_perms:
         cmd_norm = (
          'normalize-by-median.py -C {c} -k {k} -N 1 -x 1e9 -p '
@@ -300,7 +302,9 @@ def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, found_ref, paths, th
         asm_perms = [{'k':p['k'],'c':p['c'],'uc':uc} for p in norm_perms for uc in [1, 0]]
     else:
         asm_perms = [{'k':p['k'],'c':p['c'],'uc':uc} for p in norm_perms for uc in [0]]
+    cmds_asm = []
     for asm_perm in asm_perms:
+        print(asm_perm)
         cmd_vars = {
          'i':str(i),
          'k':str(asm_perm['k']),
@@ -318,6 +322,12 @@ def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, found_ref, paths, th
          .format(**cmd_vars))
         if asm_perm['uc']:
             cmd_asm += ' --untrusted-contigs ' + paths['o'] + '/ref/' + str(i) + '.ref.fasta'
+    #     cmds_asm.append(cmd_asm)
+    # with open(os.devnull, 'w') as dev_null:
+    #     processes = [subprocess.Popen(cmd_asm, shell=True, stdout=dev_null) for cmd in cmds_asm]
+    #     for process in processes:
+    #         process.wait()
+    #         print('\tDone (k=' + asm_k_list + ')') if process.returncode == 0 else sys.exit('ERR_ASM')
         cmd_asm = envoy.run(cmd_asm)
         # print(cmd_asm.std_out, cmd_asm.std_err)
         print('\tDone (k=' + asm_k_list + ')') if cmd_asm.status_code == 0 else sys.exit('ERR_ASM')
