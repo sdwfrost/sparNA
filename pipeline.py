@@ -5,20 +5,13 @@
 # Please seek permission prior to use or distribution
 
 # TODO
-# | make virus agnostic
 # | parallelise normalisation, assembly?
-# | include ref_path inside paths?
-# | if no reads are aligned in the blast step, try blasting every single read
 # | stop appeasing Insanely Bad Format - keep reads interleaved except as required
 # | use khmer for deinterleaving (split-paired-reads.py)
 # | add minimum similarity threshold for reference selection
 # | mauve/nucmer integration for when a contiguous assembly is unavailable
-# | parellelise normalisation and assembly for speed
 # | report on trimming, %remapped
 # | increase khmer table size
-# | improve command line interface
-# | check exit code of every call to os.system?
-# | pep8
 
 # DEPENDENCIES
 # | python packages:
