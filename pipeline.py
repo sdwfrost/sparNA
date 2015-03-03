@@ -25,6 +25,8 @@
 # USAGE: ./pipeline.py --threads 12 --fwd-reads-sig _F --rev-reads-sig _R --norm-k-list 31 --norm-c-list 5 --asm-k-list 33 --multiple-samples --in-dir /path/to/fastqs --out-dir /path/to/output
 # Input fastq filenames should have an extension and a signature to allow identification of forward and reverse reads
 
+# time ./pipeline.py --hcv --fwd-reads-sig _F --rev-reads-sig _R --norm-k-list 25,31 --norm-c-list 5,10,15,20 --asm-k-list 33,43 --multiple-samples --in-dir /Users/Bede/Research/Analyses/phe_asm/phe_hcv_pipeline/input --out-dir /Users/Bede/Research/Analyses/phe_asm/phe_hcv_pipeline/tmp --threads 12
+
 # min_cov
 # segemehl -A -D -E values
 # min_depth
@@ -271,8 +273,14 @@ def normalise(norm_k_list, norm_c_list, paths, i=1):
     ks = norm_k_list.split(',')
     cs = norm_c_list.split(',')
     norm_perms = [{'k':k, 'c':c} for k in ks for c in cs]
-    print('>>norm_perms:', norm_perms)
+    cmds_norm = []
     for norm_perm in norm_perms:
+        cmd_vars = {
+         'i':str(i),
+         'k':str(norm_perm['k']),
+         'c':str(norm_perm['c']),
+         'path_pipe':paths['pipe'],
+         'path_o':paths['o']}
         cmd_norm = (
          'normalize-by-median.py -C {c} -k {k} -N 1 -x 1e9 -p '
          '{path_o}/trim/{i}.trim.r12_pe.fastq '
@@ -287,24 +295,24 @@ def normalise(norm_k_list, norm_c_list, paths, i=1):
          '&& cat {path_o}/norm/{i}.norm_k{k}c{c}.r12_pe.fastq '
          '{path_o}/norm/{i}.norm_k{k}c{c}.se.fastq > '
          '{path_o}/norm/{i}.norm_k{k}c{c}.pe_and_se.fastq'
-         .format(i=str(i),
-                 k=str(norm_perm['k']),
-                 c=str(norm_perm['c']),
-                 path_pipe=paths['pipe'],
-                 path_o=paths['o']))
-        cmd_norm = os.system(cmd_norm)
-        print('\tDone (k=' + k + ', c=' + c + ')') if cmd_norm == 0 else sys.exit('ERR_NORM')
+         .format(**cmd_vars))
+        cmds_norm.append(cmd_norm)
+        print('\tDispatching norm_k={k},norm_c={c}'.format(**cmd_vars))
+    with open(os.devnull, 'w') as devnull:
+        processes = [subprocess.Popen(cmd, shell=True, stdout=devnull) for cmd in cmds_norm]
+        for process in processes:
+            process.wait()
+            print('\tDone') if process.returncode == 0 else sys.exit('ERR_NORM')
     return norm_perms
 
 def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, found_ref, paths, threads, i=1):
-    print('Assembling... ')
+    print('Assembling...')
     if found_ref and asm_untrusted_contigs:
         asm_perms = [{'k':p['k'],'c':p['c'],'uc':uc} for p in norm_perms for uc in [1, 0]]
     else:
         asm_perms = [{'k':p['k'],'c':p['c'],'uc':uc} for p in norm_perms for uc in [0]]
     cmds_asm = []
     for asm_perm in asm_perms:
-        print(asm_perm)
         cmd_vars = {
          'i':str(i),
          'k':str(asm_perm['k']),
@@ -322,15 +330,13 @@ def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, found_ref, paths, th
          .format(**cmd_vars))
         if asm_perm['uc']:
             cmd_asm += ' --untrusted-contigs ' + paths['o'] + '/ref/' + str(i) + '.ref.fasta'
-    #     cmds_asm.append(cmd_asm)
-    # with open(os.devnull, 'w') as dev_null:
-    #     processes = [subprocess.Popen(cmd_asm, shell=True, stdout=dev_null) for cmd in cmds_asm]
-    #     for process in processes:
-    #         process.wait()
-    #         print('\tDone (k=' + asm_k_list + ')') if process.returncode == 0 else sys.exit('ERR_ASM')
-        cmd_asm = envoy.run(cmd_asm)
-        # print(cmd_asm.std_out, cmd_asm.std_err)
-        print('\tDone (k=' + asm_k_list + ')') if cmd_asm.status_code == 0 else sys.exit('ERR_ASM')
+        cmds_asm.append(cmd_asm)
+        print('\tAssembling norm_k={k},norm_c={c},asm_k={asm_k_list},uc={uc}'.format(**cmd_vars))
+    with open(os.devnull, 'w') as devnull:
+        processes = [subprocess.Popen(cmd, shell=True, stdout=devnull) for cmd in cmds_asm]
+        for process in processes:
+            process.wait()
+            print('\tDone') if process.returncode == 0 else sys.exit('ERR_ASM')
 
 def evaluate_sample_assemblies(found_ref, paths, threads, i=1):
     print('Comparing assemblies... ')
