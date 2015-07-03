@@ -63,15 +63,17 @@ def import_reads(multiple_samples, fastqs, fastq_pair, paths, i=1):
     print('\t{}'.format(os.path.basename(fastq_pair[1])))
     cmd_vars = {
      'i':str(i),
-     'fq_pair_f':fastq_pair[0],
-     'fq_pair_r':fastq_pair[1],
+     'fq_pair_path_f':fastq_pair[0],
+     'fq_pair_path_r':fastq_pair[1],
+     'fq_pair_name_f':os.path.splitext(fastq_pair[0])[0],
+     'fq_pair_name_r':os.path.splitext(fastq_pair[1])[0],
      'path_o':paths['o'],
      'fastqs_f':' '.join(fastqs['f']),
      'fastqs_r':' '.join(fastqs['r'])}
     if multiple_samples:
         cmd_import = (
-         'cp {fq_pair_f} {path_o}/merge/{i}.raw.r1.fastq && '
-         'cp {fq_pair_r} {path_o}/merge/{i}.raw.r2.fastq && '
+         'cp {fq_pair_path_f} {path_o}/merge/{i}.raw.r1.fastq && '
+         'cp {fq_pair_path_r} {path_o}/merge/{i}.raw.r2.fastq && '
          .format(**cmd_vars))
     else:
         cmd_import = (
