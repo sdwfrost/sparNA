@@ -47,31 +47,31 @@ def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
     print('Identifying input... ')
     fastqs = {'f':[], 'r':[]}
     for fastq in os.listdir(paths['i']):
-        if fastq.endswith('.fastq') or fastq.endswith('.fq'):
+        if fastq.endswith('.fastq') or fastq.endswith('.fastq'):
             if fwd_reads_sig in fastq:
-                fastqs['f'].append(paths['i'] + '/' + fastq)
+                fastqs['f'].append(fastq)
             elif rev_reads_sig in fastq:
-                fastqs['r'].append(paths['i'] + '/' + fastq)
-    fq_paths = zip(fastqs['f'], fastqs['r'])
-    fq_paths = {os.path.splitext(p[0].replace(fwd_reads_sig,''))[0]: p for p in fq_paths}
-    print('\tDone') if fq_paths else sys.exit('ERR_READS')
-    return fq_paths
+                fastqs['r'].append(fastq)
+    fastqs = zip(fastqs['f'], fastqs['r'])
+    fastqs = {os.path.splitext(p[0].replace(fwd_reads_sig,''))[0]: p for p in fastqs}
+    print('\tDone') if fastqs else sys.exit('ERR_READS')
+    return fastqs
     
-def import_reads(multiple_samples, fq_path, paths, i=1):
+def import_reads(multiple_samples, fastq_path, paths, i=1):
     print('Importing reads... (SAMPLE {})'.format(i))
-    print('\t{}'.format(os.path.basename(fq_path[0])))
-    print('\t{}'.format(os.path.basename(fq_path[1])))
+    print('\t{}'.format(os.path.basename(fastq_path[0])))
+    print('\t{}'.format(os.path.basename(fastq_path[1])))
     cmd_vars = {
      'i':str(i),
-     'fq_pair_f':fq_path[0],
-     'fq_pair_r':fq_path[1],
+     'fastq_pair_f':paths['i'] + '/' + fastq_path[0],
+     'fastq_pair_r':paths['i'] + '/' + fastq_path[1],
      'path_o':paths['o'],
-     'fastqs_f':' '.join([f[0] for f in fq_path]),
-     'fastqs_f':' '.join([f[1] for f in fq_path])}
+     'fastqs_f':' '.join([paths['i'] + '/' + f[0] for f in fastq_path]),
+     'fastqs_f':' '.join([paths['i'] + '/' + f[1] for f in fastq_path])}
     if multiple_samples:
         cmd_import = (
-         'cp {fq_pair_f} {path_o}/merge/{i}.raw.r1.fastq && '
-         'cp {fq_pair_r} {path_o}/merge/{i}.raw.r2.fastq && '
+         'cp {fastq_pair_f} {path_o}/merge/{i}.raw.r1.fastq && '
+         'cp {fastq_pair_r} {path_o}/merge/{i}.raw.r2.fastq && '
          .format(**cmd_vars))
     else:
         cmd_import = (
@@ -204,7 +204,7 @@ def map_reads(ref_path, paths, threads, i=1):
      'samtools view -bS {path_o}/map/{i}.mapped.sam | samtools sort - {path_o}/map/{i}.mapped',
      'samtools index {path_o}/map/{i}.mapped.bam',
      'samtools mpileup -d 1000 -f {ref_path} {path_o}/map/{i}.mapped.bam 2> /dev/null > {path_o}/map/{i}.mapped.pile',
-     'samtools mpileup -ud 1000 -f {ref_path} {path_o}/map/{i}.mapped.bam 2> /dev/null | bcftools call -c | vcfutils.pl vcf2fq | seqtk seq -a - | fasta_formatter -o {path_o}/map/{i}.consensus.fasta']
+     'samtools mpileup -ud 1000 -f {ref_path} {path_o}/map/{i}.mapped.bam 2> /dev/null | bcftools call -c | vcfutils.pl vcf2fastq | seqtk seq -a - | fasta_formatter -o {path_o}/map/{i}.consensus.fasta']
     for j, cmd in enumerate(cmds_map, start=1):
         cmd_map = os.system(cmd.format(**cmd_vars))
         print('\tDone (' + cmd.split(' ')[0] + ')') if cmd_map == 0 else sys.exit('ERR_MAP')
@@ -396,7 +396,6 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
      'o':out_dir + '/run_' + str(int(time.time()))}
     state = {
      'fastqs':None,
-     'fq_paths':None,
      'n_reads':None,
      'n_reads_sample':None,
      'found_ref':None,
@@ -409,9 +408,9 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
     for dir in job_dirs:
         os.makedirs(paths['o'] + '/' + dir)
 
-    state['fq_paths'] = list_fastqs(fwd_reads_sig, rev_reads_sig, paths)
-    for i, fq_path in enumerate(state['fq_paths'], start=1):
-        import_reads(multiple_samples, state['fq_paths'][fq_path], paths, i)
+    state['fastqs'] = list_fastqs(fwd_reads_sig, rev_reads_sig, paths)
+    for i, fastq_path in enumerate(state['fastqs'], start=1):
+        import_reads(multiple_samples, state['fastqs'][fastq_path], paths, i)
         state['n_reads'] = count_reads(paths, i)
         if hcv:
             state['n_reads_sample'] = sample_reads(state['n_reads'], paths, i)
