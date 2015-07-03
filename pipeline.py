@@ -5,6 +5,8 @@
 # Please seek permission prior to use or distribution
 
 # TODO
+# | stop using envoy
+# | retrieve reference from Genbank?
 # | parallelise normalisation, assembly?
 # | stop appeasing Insanely Bad Format - keep reads interleaved except as required
 # | use khmer for deinterleaving (split-paired-reads.py)
@@ -56,7 +58,7 @@ def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
     return fastqs, fastq_pairs
     
 def import_reads(multiple_samples, fastqs, fastq_pair, paths, i=1):
-    print('Importing reads... (SAMPLE {0})'.format(i))
+    print('Importing reads... (SAMPLE {})'.format(i))
     cmd_vars = {
      'i':str(i),
      'fq_pair_f':fastq_pair[0],
@@ -81,14 +83,13 @@ def import_reads(multiple_samples, fastqs, fastq_pair, paths, i=1):
     cmd_import = os.system(cmd_import)
     print('\tDone') if cmd_import == 0 else sys.exit('ERR_IMPORT')
 
-
 def count_reads(paths, i=1):
     print('Counting reads...')
     cmd_count = ('wc -l {path_o}/merge/{i}.raw.r12.fastq'
     .format(i=str(i),
             path_o=paths['o']))
     cmd_count = envoy.run(cmd_count)
-    n_reads = int(cmd_count.std_out.replace(' ','').split('/')[0])/4
+    n_reads = int(cmd_count.std_out.strip().split(' ')[0])/4
     print('\tDone') if cmd_count.status_code == 0 else sys.exit('ERR_COUNT')
     return n_reads
 
@@ -338,7 +339,7 @@ def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, found_ref, paths, th
             process.wait()
             print('\tDone') if process.returncode == 0 else sys.exit('ERR_ASM')
 
-def evaluate_sample_assemblies(found_ref, paths, threads, i=1):
+def evaluate_assembly(found_ref, paths, threads, i=1):
     print('Comparing assemblies... ')
     asm_dirs = (
      [paths['o'] + '/asm/' + dir + '/contigs.fasta' for dir in
@@ -359,7 +360,7 @@ def evaluate_sample_assemblies(found_ref, paths, threads, i=1):
 def remap_reads():
     pass
 
-def evaluate_run_assemblies(paths, i):
+def evaluate_assemblies(paths, i):
     os.makedirs(paths['o'] + '/eval/summary/')
     cmd_vars = {
      'i':str(i),
@@ -375,7 +376,8 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
     norm_c_list=None, asm_k_list=None, asm_untrusted_contigs=False, multiple_samples=False,
     interleaved=False, hcv=False, threads=1):
     print('Run type:', end=' ')
-    print('virus agnostic', end=', ') if not hcv else print('HepC', end=', ')
+    print('multiple samples', end=', ') if multiple_samples else print('single sample', end=', ')
+    print('virus agnostic', end=', ') if not hcv else print('HCV', end=', ')
     print(str(threads) + ' threads')
    
     paths = {
@@ -413,7 +415,7 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
         trim(paths, i)
         assemble(normalise(norm_k_list, norm_c_list, paths, i), asm_k_list, asm_untrusted_contigs,
                  state['found_ref'], paths, threads, i)
-        evaluate_sample_assemblies(state['found_ref'], paths, threads, i)        
-    evaluate_run_assemblies(paths, i)
+        evaluate_assembly(state['found_ref'], paths, threads, i)        
+    evaluate_assemblies(paths, i)
 
 argh.dispatch_command(main)
