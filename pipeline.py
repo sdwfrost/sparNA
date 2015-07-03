@@ -59,6 +59,8 @@ def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
     
 def import_reads(multiple_samples, fastqs, fastq_pair, paths, i=1):
     print('Importing reads... (SAMPLE {})'.format(i))
+    print('\t{}'.format(os.path.basename(fastq_pair[0])))
+    print('\t{}'.format(os.path.basename(fastq_pair[1])))
     cmd_vars = {
      'i':str(i),
      'fq_pair_f':fastq_pair[0],
@@ -81,7 +83,7 @@ def import_reads(multiple_samples, fastqs, fastq_pair, paths, i=1):
      '{path_o}/merge/{i}.raw.r2.fastq 2> /dev/null > {path_o}/merge/{i}.raw.r12.fastq'
      .format(**cmd_vars))
     cmd_import = os.system(cmd_import)
-    print('\tDone') if cmd_import == 0 else sys.exit('ERR_IMPORT')
+    sys.exit('ERR_IMPORT') if cmd_import != 0 else None
 
 def count_reads(paths, i=1):
     print('Counting reads...')
@@ -110,7 +112,7 @@ def blast_references(paths, threads, i=1):
     print('BLASTing reference sequences...')
     if not os.path.exists(paths['pipe'] + '/res/hcv_db/db.fasta.nhr'):
         cmd_blastn_index = (
-         'makeblastdb -dbtype nucl -input_type fasta '
+         'makeblastdb -dbtype ngcl -input_type fasta '
          '-in {path_pipe}/res/hcv_db/db.fasta -title db'
          .format(path_pipe=paths['pipe']))
         cmd_blastn_index = os.system(cmd_blastn_index)
@@ -298,7 +300,7 @@ def normalise(norm_k_list, norm_c_list, paths, i=1):
          '{path_o}/norm/{i}.norm_k{k}c{c}.pe_and_se.fastq'
          .format(**cmd_vars))
         cmds_norm.append(cmd_norm)
-        print('\tDispatching norm_k={k},norm_c={c}'.format(**cmd_vars))
+        print('\tNormalising norm_k={k},norm_c={c}'.format(**cmd_vars))
     with open(os.devnull, 'w') as devnull:
         processes = [subprocess.Popen(cmd, shell=True, stdout=devnull) for cmd in cmds_norm]
         for process in processes:
@@ -306,19 +308,19 @@ def normalise(norm_k_list, norm_c_list, paths, i=1):
             print('\tDone') if process.returncode == 0 else sys.exit('ERR_NORM')
     return norm_perms
 
-def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, found_ref, paths, threads, i=1):
+def assemble(norm_perms, asm_k_list, asm_guide_contigs, found_ref, paths, threads, i=1):
     print('Assembling...')
-    if found_ref and asm_untrusted_contigs:
-        asm_perms = [{'k':p['k'],'c':p['c'],'uc':uc} for p in norm_perms for uc in [1, 0]]
+    if found_ref and asm_guide_contigs:
+        asm_perms = [{'k':p['k'],'c':p['c'],'gc':gc} for p in norm_perms for gc in [1, 0]]
     else:
-        asm_perms = [{'k':p['k'],'c':p['c'],'uc':uc} for p in norm_perms for uc in [0]]
+        asm_perms = [{'k':p['k'],'c':p['c'],'gc':gc} for p in norm_perms for gc in [0]]
     cmds_asm = []
     for asm_perm in asm_perms:
         cmd_vars = {
          'i':str(i),
          'k':str(asm_perm['k']),
          'c':str(asm_perm['c']),
-         'uc':str(asm_perm['uc']),
+         'gc':str(asm_perm['gc']),
          'asm_k_list':asm_k_list,
          'path_o':paths['o'],
          'threads':threads}
@@ -327,12 +329,12 @@ def assemble(norm_perms, asm_k_list, asm_untrusted_contigs, found_ref, paths, th
          '--pe1-1 {path_o}/norm/{i}.norm_k{k}c{c}.r1_pe.fastq '
          '--pe1-2 {path_o}/norm/{i}.norm_k{k}c{c}.r2_pe.fastq '
          '--s1 {path_o}/norm/{i}.norm_k{k}c{c}.se.fastq '
-         '-o {path_o}/asm/{i}.norm_k{k}c{c}.asm_k{asm_k_list}.uc{uc} --careful'
+         '-o {path_o}/asm/{i}.norm_k{k}c{c}.asm_k{asm_k_list}.gc{gc} --careful'
          .format(**cmd_vars))
-        if asm_perm['uc']:
+        if asm_perm['gc']:
             cmd_asm += ' --untrusted-contigs ' + paths['o'] + '/ref/' + str(i) + '.ref.fasta'
         cmds_asm.append(cmd_asm)
-        print('\tAssembling norm_k={k},norm_c={c},asm_k={asm_k_list},uc={uc}'.format(**cmd_vars))
+        print('\tAssembling norm_k={k},norm_c={c},asm_k={asm_k_list},gc={gc}'.format(**cmd_vars))
     with open(os.devnull, 'w') as devnull:
         processes = [subprocess.Popen(cmd, shell=True, stdout=devnull) for cmd in cmds_asm]
         for process in processes:
@@ -370,16 +372,24 @@ def evaluate_assemblies(paths, i):
      '{path_o}/eval/summary/ && cp -R {path_o}/eval/{i}/report_html_aux '
      '{path_o}/eval/summary/'.format(**cmd_vars))
     cmd_report = os.system(cmd_report)
+    print('Reporting...')
     print('\tQUAST report: ' + paths['o'] + '/eval/summary/')
 
+def report(start_time, end_time, paths):
+    elapsed_time = end_time - start_time
+    with open(paths['o'] + '/summary.txt', 'w') as report:
+        report.write('wall_time\t{}'.format(elapsed_time))
+        print('\tWall time: {0:.{1}f}s'.format(elapsed_time, 1))
+
 def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm_k_list=None,
-    norm_c_list=None, asm_k_list=None, asm_untrusted_contigs=False, multiple_samples=False,
+    norm_c_list=None, asm_k_list=None, asm_guide_contigs=False, multiple_samples=False,
     interleaved=False, hcv=False, threads=1):
     print('Run type:', end=' ')
     print('multiple samples', end=', ') if multiple_samples else print('single sample', end=', ')
     print('virus agnostic', end=', ') if not hcv else print('HCV', end=', ')
     print(str(threads) + ' threads')
    
+    start_time = time.time()
     paths = {
      'i':in_dir,
      'pipe':os.path.dirname(os.path.realpath(__file__)),
@@ -393,8 +403,8 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
      'top_ref_accession':None,
      'top_genotype':None,
      'ref_path':None,
-     'ref_len':None }
-    
+     'ref_len':None}
+
     job_dirs = ['merge', 'sample', 'blast', 'ref', 'map', 'trim', 'norm', 'asm', 'remap', 'eval']
     for dir in job_dirs:
         os.makedirs(paths['o'] + '/' + dir)
@@ -413,9 +423,10 @@ def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm
                 map_reads(state['ref_path'], paths, threads, i)
                 assess_coverage(state['ref_len'], paths, i)
         trim(paths, i)
-        assemble(normalise(norm_k_list, norm_c_list, paths, i), asm_k_list, asm_untrusted_contigs,
+        assemble(normalise(norm_k_list, norm_c_list, paths, i), asm_k_list, asm_guide_contigs,
                  state['found_ref'], paths, threads, i)
         evaluate_assembly(state['found_ref'], paths, threads, i)        
     evaluate_assemblies(paths, i)
+    report(start_time, time.time(), paths)
 
 argh.dispatch_command(main)
