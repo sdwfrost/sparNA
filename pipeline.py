@@ -66,8 +66,6 @@ def import_reads(multiple_samples, fq_path, paths, i=1):
      'fq_pair_f':fq_path[0],
      'fq_pair_r':fq_path[1],
      'path_o':paths['o'],
-     # 'fastqs_f':' '.join(fastqs['f']),
-     # 'fastqs_r':' '.join(fastqs['r'])}
      'fastqs_f':' '.join([f[0] for f in fq_path]),
      'fastqs_f':' '.join([f[1] for f in fq_path])}
     if multiple_samples:
