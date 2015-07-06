@@ -453,6 +453,7 @@ def main(fwd_reads=None, rev_reads=None, reads_dir=None, out_dir='output', fwd_r
                 map_reads(state['ref_path'], paths, threads, i)
                 assess_coverage(state['ref_len'], paths, i)
         trim(sample_name, paths, i)
+        # Ref_found needs cleaning up
         assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, i), asm_k_list, asm_using_ref,
                  state['ref_found'], sample_name, paths, threads, i)
         evaluate_assembly(reference, paths, threads, i)        
