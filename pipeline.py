@@ -5,19 +5,22 @@
 # Please seek permission prior to use or distribution
 
 # TODO
+# | Fix final assembly evaluation 
+# | Interleaved reads (ONE TRUE FORMAT)
+# | Python3
 # | stop using envoy
-# | retrieve reference from Genbank?
-# | parallelise normalisation, assembly?
-# | stop appeasing Insanely Bad Format - keep reads interleaved except as required
+# | accept interleaved input
 # | use khmer for deinterleaving (split-paired-reads.py)
 # | add minimum similarity threshold for reference selection
-# | mauve/nucmer integration for when a contiguous assembly is unavailable
 # | report on trimming, %remapped
 # | increase khmer table size
+# | TESTS
+# | allow reference to be supplied for QUAST and assembly
+# | use roiginal filenames
 
 # DEPENDENCIES
 # | python packages:
-# |    argh, biopython, envoy, khmer
+# |    argh, biopython, envoy, khmer, matplotlib
 # | others, expected inside $PATH:
 # |    blast, samtools, seqtk, spades, quast, parallel (GNU)
 # | others, bundled inside res/ directory:
@@ -45,51 +48,55 @@ from Bio.Blast.Applications import NcbiblastnCommandline
 
 def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
     print('Identifying input... ')
-    fastqs = {'f':[], 'r':[]}
-    for fastq in os.listdir(paths['i']):
-        if fastq.endswith('.fastq') or fastq.endswith('.fastq'):
-            if fwd_reads_sig in fastq:
-                fastqs['f'].append(fastq)
-            elif rev_reads_sig in fastq:
-                fastqs['r'].append(fastq)
-    fastqs = zip(fastqs['f'], fastqs['r'])
-    fastqs = {os.path.splitext(p[0].replace(fwd_reads_sig,''))[0]: p for p in fastqs}
+    fastqs = {'f':[],'r':[],'fr':[]}
+    if paths['in_dir']:
+        for fastq in os.listdir(paths['in_dir']):
+            if fastq.endswith('.fastq') or fastq.endswith('.fastq'):
+                if fwd_reads_sig in fastq:
+                    fastqs['f'].append(fastq)
+                elif rev_reads_sig in fastq:
+                    fastqs['r'].append(fastq)
+        fastqs = zip(fastqs['f'], fastqs['r'])
+        fastqs = {os.path.splitext(f[0].replace(fwd_reads_sig,''))[0]: f for f in fastqs}
+        # print(fastqs)
+    elif paths['in_fwd'] and paths['in_rev']:
+        fastqs['f'].append(os.path.basename(paths['in_fwd']))
+        fastqs['r'].append(os.path.basename(paths['in_rev']))
+        fastqs = zip(fastqs['f'], fastqs['r'])
+        fastqs = {os.path.splitext(f[0].replace(fwd_reads_sig,''))[0]: f for f in fastqs}
+        # print(fastqs)
     print('\tDone') if fastqs else sys.exit('ERR_READS')
     return fastqs
     
-def import_reads(multiple_samples, fastq_path, paths, i=1):
+def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
+    # need to pass in list of files with a good name
     print('Importing reads... (SAMPLE {})'.format(i))
-    print('\t{}'.format(os.path.basename(fastq_path[0])))
-    print('\t{}'.format(os.path.basename(fastq_path[1])))
-    cmd_vars = {
-     'i':str(i),
-     'fastq_pair_f':paths['i'] + '/' + fastq_path[0],
-     'fastq_pair_r':paths['i'] + '/' + fastq_path[1],
-     'path_o':paths['o'],
-     'fastqs_f':' '.join([paths['i'] + '/' + f[0] for f in fastq_path]),
-     'fastqs_f':' '.join([paths['i'] + '/' + f[1] for f in fastq_path])}
     if multiple_samples:
-        cmd_import = (
-         'cp {fastq_pair_f} {path_o}/merge/{i}.raw.r1.fastq && '
-         'cp {fastq_pair_r} {path_o}/merge/{i}.raw.r2.fastq && '
-         .format(**cmd_vars))
+        fastq_path = paths['in_dir']
     else:
-        cmd_import = (
-         'cat {fastqs_f} > {path_o}/merge/{i}.raw.r1.fastq && '
-         'cat {fastqs_r} > {path_o}/merge/{i}.raw.r2.fastq && '
-         .format(**cmd_vars))
-    cmd_import += (
-     'interleave-reads.py {path_o}/merge/{i}.raw.r1.fastq '
-     '{path_o}/merge/{i}.raw.r2.fastq 2> /dev/null > {path_o}/merge/{i}.raw.r12.fastq'
-     .format(**cmd_vars))
+        fastq_path = os.path.split(paths['in_fwd'])[0]
+    cmd_vars = {
+    'i':str(i),
+    'sample_name':sample_name,
+    'fastq_path_f':fastq_path + '/' + fastq_names[0],
+    'fastq_path_r':fastq_path + '/' + fastq_names[1],
+    'path_o':paths['o']}
+    cmd_import = (
+    'cp {fastq_path_f} {path_o}/merge/{i}.{sample_name}.raw.r1.fastq && '
+    'cp {fastq_path_r} {path_o}/merge/{i}.{sample_name}.raw.r2.fastq && '
+    'interleave-reads.py {path_o}/merge/{i}.{sample_name}.raw.r1.fastq '
+    '{path_o}/merge/{i}.{sample_name}.raw.r2.fastq 2> /dev/null > '
+    '{path_o}/merge/{i}.{sample_name}.raw.r12.fastq'
+    .format(**cmd_vars))
     cmd_import = os.system(cmd_import)
     sys.exit('ERR_IMPORT') if cmd_import != 0 else None
 
-def count_reads(paths, i=1):
+def count_reads(sample_name, paths, i=1):
     print('Counting reads...')
-    cmd_count = ('wc -l {path_o}/merge/{i}.raw.r12.fastq'
+    cmd_count = ('wc -l {path_o}/merge/{i}.{sample_name}.raw.r12.fastq'
     .format(i=str(i),
-            path_o=paths['o']))
+            path_o=paths['o'],
+            sample_name=sample_name))
     cmd_count = envoy.run(cmd_count)
     n_reads = int(cmd_count.std_out.strip().split(' ')[0])/4
     print('\tDone') if cmd_count.status_code == 0 else sys.exit('ERR_COUNT')
@@ -135,14 +142,14 @@ def choose_reference(paths, i=1):
                     accession_freqs[accession] += 1
                 else: accession_freqs[accession] = 1
     if accession_freqs:
-        found_ref = True
+        ref_found = True
         top_ref_accession = max(accession_freqs, key=accession_freqs.get)
     else:
-        found_ref = False
+        ref_found = False
         top_ref_accession = None
         print('\tWARNING: failed to identify a similar reference sequence')
     print('\tDone')
-    return found_ref, top_ref_accession
+    return ref_found, top_ref_accession
 
 def extract_reference(top_ref_accession, paths, i=1):
     print('Extracting reference ' + top_ref_accession + '...')
@@ -247,34 +254,36 @@ def assess_coverage(ref_len, paths, i=1):
         print('\tReference coverage below threshold')
     print('\tDone')
 
-def trim(paths, i=1):
+def trim(sample_name, paths, i=1):
     print('Trimming... ')
     cmd_trim = (
      'java -jar {path_pipe}/res/trimmomatic-0.32.jar PE '
-     '{path_o}/merge/{i}.raw.r1.fastq {path_o}/merge/{i}.raw.r2.fastq '
-     '{path_o}/trim/{i}.trim.r1_pe.fastq {path_o}/trim/{i}.trim.r1_se.fastq '
-     '{path_o}/trim/{i}.trim.r2_pe.fastq {path_o}/trim/{i}.trim.r2_se.fastq '
+     '{path_o}/merge/{i}.{sample_name}.raw.r1.fastq {path_o}/merge/{i}.{sample_name}.raw.r2.fastq '
+     '{path_o}/trim/{i}.{sample_name}.trim.r1_pe.fastq {path_o}/trim/{i}.{sample_name}.trim.r1_se.fastq '
+     '{path_o}/trim/{i}.{sample_name}.trim.r2_pe.fastq {path_o}/trim/{i}.{sample_name}.trim.r2_se.fastq '
      'ILLUMINACLIP:{path_pipe}/res/illumina_adapters.fa:2:30:10 MINLEN:25'
      .format(i=str(i),
              path_pipe=paths['pipe'],
-             path_o=paths['o']))
+             path_o=paths['o'],
+             sample_name=sample_name))
     cmd_trim_pp = (
-     'cat {path_o}/trim/{i}.trim.r1_se.fastq {path_o}/trim/{i}.trim.r2_se.fastq > '
-     '{path_o}/trim/{i}.trim.se.fastq '
-     '&& interleave-reads.py {path_o}/trim/{i}.trim.r1_pe.fastq '
-     '{path_o}/trim/{i}.trim.r2_pe.fastq 2> /dev/null > {path_o}/trim/{i}.trim.r12_pe.fastq'
+     'cat {path_o}/trim/{i}.{sample_name}.trim.r1_se.fastq {path_o}/trim/{i}.{sample_name}.trim.r2_se.fastq > '
+     '{path_o}/trim/{i}.{sample_name}.trim.se.fastq '
+     '&& interleave-reads.py {path_o}/trim/{i}.{sample_name}.trim.r1_pe.fastq '
+     '{path_o}/trim/{i}.{sample_name}.trim.r2_pe.fastq 2> /dev/null > {path_o}/trim/{i}.{sample_name}.trim.r12_pe.fastq'
      .format(i=str(i), 
              path_pipe=paths['pipe'],
-             path_o=paths['o']))
+             path_o=paths['o'],
+             sample_name=sample_name))
     cmd_trim = envoy.run(cmd_trim)
     cmd_trim_stats = ''.join(cmd_trim.std_err).split('\n')[25]
     cmd_trim_pp = os.system(cmd_trim_pp)
     print('\tDone') if cmd_trim.status_code == 0 and cmd_trim_pp == 0 else sys.exit('ERR_TRIM')
 
-def normalise(norm_k_list, norm_c_list, paths, i=1):
+def normalise(norm_k_list, norm_cov_list, sample_name, paths, i=1):
     print('Normalising... ')
     ks = norm_k_list.split(',')
-    cs = norm_c_list.split(',')
+    cs = norm_cov_list.split(',')
     norm_perms = [{'k':k, 'c':c} for k in ks for c in cs]
     cmds_norm = []
     for norm_perm in norm_perms:
@@ -283,21 +292,22 @@ def normalise(norm_k_list, norm_c_list, paths, i=1):
          'k':str(norm_perm['k']),
          'c':str(norm_perm['c']),
          'path_pipe':paths['pipe'],
-         'path_o':paths['o']}
+         'path_o':paths['o'],
+         'sample_name':sample_name}
         cmd_norm = (
          'normalize-by-median.py -C {c} -k {k} -N 1 -x 1e9 -p '
-         '{path_o}/trim/{i}.trim.r12_pe.fastq '
-         '-o {path_o}/norm/{i}.norm_k{k}c{c}.r12_pe.fastq &> /dev/null '
+         '{path_o}/trim/{i}.{sample_name}.trim.r12_pe.fastq '
+         '-o {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r12_pe.fastq &> /dev/null '
          '&& normalize-by-median.py -C {c} -k {k} -N 1 -x 1e9 '
-         '{path_o}/trim/{i}.trim.se.fastq '
-         '-o {path_o}/norm/{i}.norm_k{k}c{c}.se.fastq &> /dev/null '
+         '{path_o}/trim/{i}.{sample_name}.trim.se.fastq '
+         '-o {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.se.fastq &> /dev/null '
          '&& {path_pipe}/res/fastq_deinterleave '
-         '{path_o}/norm/{i}.norm_k{k}c{c}.r12_pe.fastq '
-         '{path_o}/norm/{i}.norm_k{k}c{c}.r1_pe.fastq '
-         '{path_o}/norm/{i}.norm_k{k}c{c}.r2_pe.fastq '
-         '&& cat {path_o}/norm/{i}.norm_k{k}c{c}.r12_pe.fastq '
-         '{path_o}/norm/{i}.norm_k{k}c{c}.se.fastq > '
-         '{path_o}/norm/{i}.norm_k{k}c{c}.pe_and_se.fastq'
+         '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r12_pe.fastq '
+         '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r1_pe.fastq '
+         '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r2_pe.fastq '
+         '&& cat {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r12_pe.fastq '
+         '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.se.fastq > '
+         '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.pe_and_se.fastq'
          .format(**cmd_vars))
         cmds_norm.append(cmd_norm)
         print('\tNormalising norm_k={k},norm_c={c}'.format(**cmd_vars))
@@ -308,54 +318,64 @@ def normalise(norm_k_list, norm_c_list, paths, i=1):
             print('\tDone') if process.returncode == 0 else sys.exit('ERR_NORM')
     return norm_perms
 
-def assemble(norm_perms, asm_k_list, asm_guide_contigs, found_ref, paths, threads, i=1):
+def assemble(norm_perms, asm_k_list, asm_using_ref, ref_found, sample_name, paths, threads, i=1):
     print('Assembling...')
-    if found_ref and asm_guide_contigs:
-        asm_perms = [{'k':p['k'],'c':p['c'],'gc':gc} for p in norm_perms for gc in [1, 0]]
+    if ref_found and asm_using_ref:
+        asm_perms = [{'k':p['k'],'c':p['c'],'rg':rg} for p in norm_perms for rg in [1, 0]]
     else:
-        asm_perms = [{'k':p['k'],'c':p['c'],'gc':gc} for p in norm_perms for gc in [0]]
+        asm_perms = [{'k':p['k'],'c':p['c'],'rg':rg} for p in norm_perms for rg in [0]]
     cmds_asm = []
     for asm_perm in asm_perms:
         cmd_vars = {
          'i':str(i),
          'k':str(asm_perm['k']),
          'c':str(asm_perm['c']),
-         'gc':str(asm_perm['gc']),
+         'rg':str(asm_perm['rg']),
          'asm_k_list':asm_k_list,
          'path_o':paths['o'],
+         'sample_name':sample_name,
          'threads':threads}
         cmd_asm = (
          'spades.py -m 8 -t {threads} -k {asm_k_list} '
-         '--pe1-1 {path_o}/norm/{i}.norm_k{k}c{c}.r1_pe.fastq '
-         '--pe1-2 {path_o}/norm/{i}.norm_k{k}c{c}.r2_pe.fastq '
-         '--s1 {path_o}/norm/{i}.norm_k{k}c{c}.se.fastq '
-         '-o {path_o}/asm/{i}.norm_k{k}c{c}.asm_k{asm_k_list}.gc{gc} --careful'
+         '--pe1-1 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r1_pe.fastq '
+         '--pe1-2 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r2_pe.fastq '
+         '--s1 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.se.fastq '
+         '-o {path_o}/asm/{i}.{sample_name}.norm_k{k}c{c}.asm_k{asm_k_list}.rg{rg} --careful'
          .format(**cmd_vars))
-        if asm_perm['gc']:
+        if asm_perm['rg']:
             cmd_asm += ' --untrusted-contigs ' + paths['o'] + '/ref/' + str(i) + '.ref.fasta'
         cmds_asm.append(cmd_asm)
-        print('\tAssembling norm_k={k},norm_c={c},asm_k={asm_k_list},gc={gc}'.format(**cmd_vars))
+        print('\tAssembling norm_k={k},norm_c={c},asm_k={asm_k_list},rg={rg}'.format(**cmd_vars))
     with open(os.devnull, 'w') as devnull:
         processes = [subprocess.Popen(cmd, shell=True, stdout=devnull) for cmd in cmds_asm]
         for process in processes:
             process.wait()
             print('\tDone') if process.returncode == 0 else sys.exit('ERR_ASM')
 
-def evaluate_assembly(found_ref, paths, threads, i=1):
+# First arg previosly ref_found
+def evaluate_assembly(reference, est_ref_size, paths, threads, i=1):
     print('Comparing assemblies... ')
     asm_dirs = (
      [paths['o'] + '/asm/' + dir + '/contigs.fasta' for dir in
      filter(lambda d: d.startswith(str(i)), os.listdir(paths['o'] + '/asm'))])
     # print(asm_dirs)
     cmd_vars = {
-     'i':str(i),
-     'asm_dirs':' '.join(asm_dirs),
-     'path_o':paths['o'],
-     'threads':threads}
+    'i':str(i),
+    'asm_dirs':' '.join(asm_dirs),
+    'ref_len':est_ref_size,
+    'path_ref':paths['ref'],
+    'path_o':paths['o'],
+    'threads':threads}
     cmd_eval = ('quast.py {asm_dirs} -o {path_o}/eval/{i} --threads {threads}'.format(**cmd_vars))
-    if found_ref:
-        cmd_eval += ' -R {path_o}/ref/{i}.ref.fasta'.format(**cmd_vars)
+    # if ref_found:
+    #     cmd_eval += ' -R {path_o}/ref/{i}.{sample_name}.ref.fasta'.format(**cmd_vars)
+    if reference:
+        print('REFERENCE')
+        cmd_eval += ' -R {path_ref}'.format(**cmd_vars)
+    if est_ref_size:
+        cmd_eval += ' --est-ref-size {ref_len}'.format(**cmd_vars)
     cmd_eval += ' &> /dev/null'
+    print(cmd_eval)
     cmd_eval = os.system(cmd_eval)
     print('\tDone') if cmd_eval == 0 else sys.exit('ERR_EVAL')
 
@@ -381,51 +401,62 @@ def report(start_time, end_time, paths):
         report.write('wall_time\t{}'.format(elapsed_time))
         print('\tWall time: {0:.{1}f}s'.format(elapsed_time, 1))
 
-def main(in_dir=None, out_dir=None, fwd_reads_sig=None, rev_reads_sig=None, norm_k_list=None,
-    norm_c_list=None, asm_k_list=None, asm_guide_contigs=False, multiple_samples=False,
-    interleaved=False, hcv=False, threads=1):
-    print('Run type:', end=' ')
-    print('multiple samples', end=', ') if multiple_samples else print('single sample', end=', ')
-    print('virus agnostic', end=', ') if not hcv else print('HCV', end=', ')
-    print(str(threads) + ' threads')
+def main(fwd_reads=None, rev_reads=None, reads_dir=None, out_dir='output', fwd_reads_sig='_F',
+    rev_reads_sig='_R', norm_k_list=None, norm_cov_list=None, asm_k_list=None,
+    reference=None, asm_using_ref=False, est_ref_size=None,
+    map_before_asm=False, map_after_asm=False,
+    hcv=False, threads=1):
+   
+    multiple_samples = True if reads_dir else False
+
+    print('Run options...')
+    print('\tMultiple input samples') if multiple_samples else print('\tSingle sample')
+    print('\tPaired read signatures: \'' + fwd_reads_sig + '\', \'' + rev_reads_sig + '\'')
+    print('\tVirus agnostic') if not hcv else print('Using HCV-specific features')
+    print('\t' + str(threads) + ' threads')
    
     start_time = time.time()
     paths = {
-     'i':in_dir,
-     'pipe':os.path.dirname(os.path.realpath(__file__)),
-     'o':out_dir + '/run_' + str(int(time.time()))}
+    'in_dir':reads_dir,
+    'in_fwd':fwd_reads,
+    'in_rev':rev_reads,
+    'ref':reference,
+    'pipe':os.path.dirname(os.path.realpath(__file__)),
+    'o':out_dir + '/run_' + str(int(time.time()))}
     state = {
-     'fastqs':None,
-     'n_reads':None,
-     'n_reads_sample':None,
-     'found_ref':None,
-     'top_ref_accession':None,
-     'top_genotype':None,
-     'ref_path':None,
-     'ref_len':None}
+    'fastqs':None,
+    'n_reads':None,
+    'n_reads_sample':None,
+    'ref_found':None,
+    'top_ref_accession':None,
+    'top_genotype':None,
+    'ref_path':None,
+    'ref_len':None}
 
     job_dirs = ['merge', 'sample', 'blast', 'ref', 'map', 'trim', 'norm', 'asm', 'remap', 'eval']
     for dir in job_dirs:
         os.makedirs(paths['o'] + '/' + dir)
 
     state['fastqs'] = list_fastqs(fwd_reads_sig, rev_reads_sig, paths)
-    for i, fastq_path in enumerate(state['fastqs'], start=1):
-        import_reads(multiple_samples, state['fastqs'][fastq_path], paths, i)
-        state['n_reads'] = count_reads(paths, i)
+    i = 0 # counter for file naming
+    for sample_name, fastq_names in state['fastqs'].items():
+        i += 1
+        import_reads(multiple_samples, sample_name, fastq_names, paths, i)
+        state['n_reads'] = count_reads(sample_name, paths, i)
         if hcv:
             state['n_reads_sample'] = sample_reads(state['n_reads'], paths, i)
             blast_references(paths, threads, i)
-            state['found_ref'], state['top_ref_accession'] = choose_reference(paths, i)
-            if state['found_ref']:
+            state['ref_found'], state['top_ref_accession'] = choose_reference(paths, i)
+            if state['ref_found']:
                 state['ref_path'], state['ref_len'] = extract_reference(state['top_ref_accession'], paths, i)
                 state['top_genotype'] = genotype(state['n_reads'], state['n_reads_sample'], paths, i)
                 map_reads(state['ref_path'], paths, threads, i)
                 assess_coverage(state['ref_len'], paths, i)
-        trim(paths, i)
-        assemble(normalise(norm_k_list, norm_c_list, paths, i), asm_k_list, asm_guide_contigs,
-                 state['found_ref'], paths, threads, i)
-        evaluate_assembly(state['found_ref'], paths, threads, i)        
-    evaluate_assemblies(paths, i)
+        trim(sample_name, paths, i)
+        assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, i), asm_k_list, asm_using_ref,
+                 state['ref_found'], sample_name, paths, threads, i)
+        evaluate_assembly(reference, paths, threads, i)        
+    evaluate_assemblies(paths, i) if multiple_samples else None
     report(start_time, time.time(), paths)
 
 argh.dispatch_command(main)
