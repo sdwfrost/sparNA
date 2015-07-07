@@ -9,8 +9,6 @@
 # | Interleaved reads (ONE TRUE FORMAT)
 # | Python3
 # | stop using envoy
-# | accept interleaved input
-# | use khmer for deinterleaving (split-paired-reads.py)
 # | add minimum similarity threshold for reference selection
 # | report on trimming, %remapped
 # | increase khmer table size
@@ -301,10 +299,10 @@ def normalise(norm_k_list, norm_cov_list, sample_name, paths, i=1):
          '&& normalize-by-median.py -C {c} -k {k} -N 1 -x 1e9 '
          '{path_o}/trim/{i}.{sample_name}.trim.se.fastq '
          '-o {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.se.fastq &> /dev/null '
-         '&& {path_pipe}/res/fastq_deinterleave '
-         '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r12_pe.fastq '
-         '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r1_pe.fastq '
-         '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r2_pe.fastq '
+         '&& split-paired-reads.py '
+         '-1 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r1_pe.fastq '
+         '-2 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r2_pe.fastq '
+         '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r12_pe.fastq &> /dev/null '
          '&& cat {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r12_pe.fastq '
          '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.se.fastq > '
          '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.pe_and_se.fastq'
