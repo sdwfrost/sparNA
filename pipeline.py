@@ -5,7 +5,7 @@
 # Please seek permission prior to use or distribution
 
 # TODO
-# | Fix final assembly evaluation 
+# | Fix read remapping
 # | Interleaved reads (ONE TRUE FORMAT)
 # | Python3
 # | stop using envoy
@@ -13,16 +13,15 @@
 # | report on trimming, %remapped
 # | increase khmer table size
 # | TESTS
-# | allow reference to be supplied for QUAST and assembly
-# | use roiginal filenames
+# | Which reference to use in QUAST... ref_found?
 
 # DEPENDENCIES
 # | python packages:
 # |    argh, biopython, envoy, khmer, matplotlib
 # | others, expected inside $PATH:
-# |    blast, samtools, seqtk, spades, quast, parallel (GNU)
+# |    vwa, blast, samtools, seqtk, spades, quast, parallel (GNU)
 # | others, bundled inside res/ directory:
-# |    trimmomatic, fastq_deinterleave
+# |    trimmomatic
 # | others, bundled and requiring compilation: segemehl
 
 # USAGE: ./pipeline.py --threads 12 --fwd-reads-sig _F --rev-reads-sig _R --norm-k-list 31 --norm-c-list 5 --asm-k-list 33 --multiple-samples --in-dir /path/to/fastqs --out-dir /path/to/output
@@ -89,7 +88,7 @@ def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
     cmd_import = os.system(cmd_import)
     sys.exit('ERR_IMPORT') if cmd_import != 0 else None
 
-def count_reads(sample_name, paths, i=1):
+def hcv_count_reads(sample_name, paths, i=1):
     print('Counting reads...')
     cmd_count = ('wc -l {path_o}/merge/{i}.{sample_name}.raw.r12.fastq'
     .format(i=str(i),
@@ -100,11 +99,11 @@ def count_reads(sample_name, paths, i=1):
     print('\tDone') if cmd_count.status_code == 0 else sys.exit('ERR_COUNT')
     return n_reads
 
-def sample_reads(n_reads, paths, i=1):
+def hcv_sample_reads(n_reads, paths, i=1):
     n_reads_sample = 1e4 if n_reads >= 1e4 else n_reads
     print('Sampling ' + str(int(n_reads_sample)) + ' reads...')
     cmd_sample = (
-     'cat {path_o}/merge/{i}.raw.r12.fastq | seqtk sample - '
+     'cat {path_o}/merge/{i}.{sample_name}.raw.r12.fastq | seqtk sample - '
      '{n_reads_sample} | seqtk seq -a - > {path_o}/sample/{i}.sample.fasta'
      .format(i=str(i),
              path_o=paths['o'],
@@ -113,7 +112,7 @@ def sample_reads(n_reads, paths, i=1):
     print('\tDone') if cmd_sample == 0 else sys.exit('ERR_SAMPLE')
     return n_reads_sample
 
-def blast_references(paths, threads, i=1):
+def hcv_blast_references(paths, threads, i=1):
     print('BLASTing reference sequences...')
     if not os.path.exists(paths['pipe'] + '/res/hcv_db/db.fasta.nhr'):
         cmd_blastn_index = (
@@ -129,7 +128,7 @@ def blast_references(paths, threads, i=1):
     cmd_blastn()
     print('\tDone')
 
-def choose_reference(paths, i=1):
+def hcv_choose_reference(paths, i=1):
     print('Choosing reference sequence...')
     accession_freqs = {}
     with open(paths['o'] + '/blast/' + str(i) + '.blast.tsv', 'r') as blast_out:
@@ -149,7 +148,7 @@ def choose_reference(paths, i=1):
     print('\tDone')
     return ref_found, top_ref_accession
 
-def extract_reference(top_ref_accession, paths, i=1):
+def hcv_extract_reference(top_ref_accession, paths, i=1):
     print('Extracting reference ' + top_ref_accession + '...')
     reference = ''
     with open(paths['pipe'] + '/res/hcv_db/db.fasta', 'r') as references_fa:
@@ -168,53 +167,54 @@ def extract_reference(top_ref_accession, paths, i=1):
     print('\tDone')
     return ref_path, ref_len
 
-def genotype(n_reads, n_reads_sample, paths, i=1):
+def hcv_genotype(n_reads, n_reads_sample, paths, i=1):
     print('Genotyping...')
     prop_reads_sample = n_reads_sample/n_reads
-    genotype_freqs = {}
+    hcv_genotype_freqs = {}
     with open(paths['o'] + '/blast/' + str(i) + '.blast.tsv', 'r') as blast_out:
         for line in blast_out:
             if not line.startswith('#'):
-                genotype = line.split('\t')[1].split('_')[1].split('.')[0]
-                if genotype in genotype_freqs.keys():
-                    genotype_freqs[genotype] += 1
-                else: genotype_freqs[genotype] = 1
-    top_genotype = max(genotype_freqs, key=genotype_freqs.get) if genotype_freqs else None
-    genotype_props = {k: genotype_freqs[k]/n_reads*100 for k in genotype_freqs.keys()}
-    genotype_props_pc = {k: round(genotype_freqs[k]/n_reads_sample*100, 3) for k in genotype_freqs.keys()}
-    genotype_props_pc_sorted = []
-    for genotype, proportion in reversed(sorted(genotype_props_pc.items(), key=lambda(k,v):(v,k))):
-        record = (genotype + ': ' + str(proportion) + '% (' + str(genotype_freqs[genotype]) + ')')
-        genotype_props_pc_sorted.append(record)
+                hcv_genotype = line.split('\t')[1].split('_')[1].split('.')[0]
+                if hcv_genotype in hcv_genotype_freqs.keys():
+                    hcv_genotype_freqs[hcv_genotype] += 1
+                else: hcv_genotype_freqs[hcv_genotype] = 1
+    top_hcv_genotype = max(hcv_genotype_freqs, key=hcv_genotype_freqs.get) if hcv_genotype_freqs else None
+    hcv_genotype_props = {k: hcv_genotype_freqs[k]/n_reads*100 for k in hcv_genotype_freqs.keys()}
+    hcv_genotype_props_pc = {k: round(hcv_genotype_freqs[k]/n_reads_sample*100, 3) for k in hcv_genotype_freqs.keys()}
+    hcv_genotype_props_pc_sorted = []
+    for hcv_genotype, proportion in reversed(sorted(hcv_genotype_props_pc.items(), key=lambda(k,v):(v,k))):
+        record = (hcv_genotype + ': ' + str(proportion) + '% (' + str(hcv_genotype_freqs[hcv_genotype]) + ')')
+        hcv_genotype_props_pc_sorted.append(record)
         print('\t' + record)
-    with open(paths['o'] + '/blast/' + str(i) + '.genotypes.txt', 'w') as genotypes_file:
-        for item in genotype_props_pc_sorted:
-             genotypes_file.write(item + '\n')
+    with open(paths['o'] + '/blast/' + str(i) + '.hcv_genotypes.txt', 'w') as hcv_genotypes_file:
+        for item in hcv_genotype_props_pc_sorted:
+             hcv_genotypes_file.write(item + '\n')
     print('\tDone')
-    return top_genotype
+    return top_hcv_genotype
 
-def map_reads(ref_path, paths, threads, i=1):
+def hcv_map_reads(ref_path, paths, threads, i=1):
     print('Aligning... ')
     cmd_vars = {
-     'i':str(i),
-     'path_pipe':paths['pipe'],
-     'path_o':paths['o'],
-     'ref_path':ref_path,
-     'threads':threads}
+    'i':str(i),
+    'sample_name':sample_name,
+    'path_pipe':paths['pipe'],
+    'path_o':paths['o'],
+    'ref_path':ref_path,
+    'threads':threads}
     cmds_map = [
-     'bwa index {ref_path} &> /dev/null',
-     'bwa mem -v 0 -p -t {threads} {ref_path} {path_o}/merge/{i}.raw.r12.fastq 2> /dev/null > {path_o}/map/{i}.mapped.sam',
-     # '{path_pipe}/res/segemehl/segemehl.x -d {ref_path} -x {ref_path}.idx &> /dev/null',
-     # '{path_pipe}/res/segemehl/segemehl.x -d {ref_path} -x {ref_path}.idx -q {path_o}/merge/{i}.raw.r12.fastq --threads {threads} -A 60 2> /dev/null > {path_o}/map/{i}.mapped.sam',
-     'samtools view -bS {path_o}/map/{i}.mapped.sam | samtools sort - {path_o}/map/{i}.mapped',
-     'samtools index {path_o}/map/{i}.mapped.bam',
-     'samtools mpileup -d 1000 -f {ref_path} {path_o}/map/{i}.mapped.bam 2> /dev/null > {path_o}/map/{i}.mapped.pile',
-     'samtools mpileup -ud 1000 -f {ref_path} {path_o}/map/{i}.mapped.bam 2> /dev/null | bcftools call -c | vcfutils.pl vcf2fastq | seqtk seq -a - | fasta_formatter -o {path_o}/map/{i}.consensus.fasta']
+    'bwa index {ref_path} &> /dev/null',
+    'bwa mem -v 0 -p -t {threads} {ref_path} {path_o}/merge/{i}.{sample_name}.raw.r12.fastq 2> /dev/null > {path_o}/map/{i}.mapped.sam',
+    # '{path_pipe}/res/segemehl/segemehl.x -d {ref_path} -x {ref_path}.idx &> /dev/null',
+    # '{path_pipe}/res/segemehl/segemehl.x -d {ref_path} -x {ref_path}.idx -q {path_o}/merge/{i}.{sample_name}.raw.r12.fastq --threads {threads} -A 60 2> /dev/null > {path_o}/map/{i}.mapped.sam',
+    'samtools view -bS {path_o}/map/{i}.mapped.sam | samtools sort - {path_o}/map/{i}.mapped',
+    'samtools index {path_o}/map/{i}.mapped.bam',
+    'samtools mpileup -d 1000 -f {ref_path} {path_o}/map/{i}.mapped.bam 2> /dev/null > {path_o}/map/{i}.mapped.pile',
+    'samtools mpileup -ud 1000 -f {ref_path} {path_o}/map/{i}.mapped.bam 2> /dev/null | bcftools call -c | vcfutils.pl vcf2fq | seqtk seq -a - > {path_o}/map/{i}.consensus.fasta']
     for j, cmd in enumerate(cmds_map, start=1):
         cmd_map = os.system(cmd.format(**cmd_vars))
-        print('\tDone (' + cmd.split(' ')[0] + ')') if cmd_map == 0 else sys.exit('ERR_MAP')
+        print('\tDone (' + cmd.split(' ')[0] + ')') if cmd_map == 0 else sys.exit('ERR_MAP') # sample_name should be in here
 
-def assess_coverage(ref_len, paths, i=1):
+def hcv_assess_coverage(ref_len, paths, i=1):
     print('Identifying low coverage regions... ')
     min_depth = 1
     min_coverage = 0.9
@@ -251,6 +251,31 @@ def assess_coverage(ref_len, paths, i=1):
     else:
         print('\tReference coverage below threshold')
     print('\tDone')
+
+def map_reads(ref, sample_name, paths, threads, i=1):
+    print('Aligning... ')
+    cmd_vars = {
+     'i':str(i),
+     'sample_name':sample_name,
+     'path_pipe':paths['pipe'],
+     'path_o':paths['o'],
+     'ref':ref,
+     'threads':threads
+    }
+    cmds_map = [
+     'cp {ref} {path_o}/ref/ref.fasta',
+     'bwa index {ref} &> /dev/null',
+     'bwa mem -v 0 -p -t {threads} {ref} {path_o}/merge/{i}.{sample_name}.raw.r12.fastq '
+     '2> /dev/null > {path_o}/map/{i}.mapped.sam',
+     'samtools view -bS {path_o}/map/{i}.mapped.sam | samtools sort - {path_o}/map/{i}.mapped',
+     'samtools index {path_o}/map/{i}.mapped.bam',
+     'samtools mpileup -d 1000 -f {ref} {path_o}/map/{i}.mapped.bam 2> /dev/null '
+     '> {path_o}/map/{i}.mapped.pile',
+     'samtools mpileup -ud 1000 -f {ref} {path_o}/map/{i}.mapped.bam 2> /dev/null '
+     '| bcftools call -c | vcfutils.pl vcf2fq | seqtk seq -a - > {path_o}/map/{i}.consensus.fasta']
+    for j, cmd in enumerate(cmds_map, start=1):
+        cmd_map = os.system(cmd.format(**cmd_vars))
+        print('\tDone (' + cmd.split(' ')[0] + ')') if cmd_map == 0 else sys.exit('ERR_MAP')
 
 def trim(sample_name, paths, i=1):
     print('Trimming... ')
@@ -350,48 +375,82 @@ def assemble(norm_perms, asm_k_list, asm_using_ref, ref_found, sample_name, path
             process.wait()
             print('\tDone') if process.returncode == 0 else sys.exit('ERR_ASM')
 
+def choose_assembly():
+    pass
+
+def remap_reads():
+    pass
+
 # First arg previosly ref_found
-def evaluate_assembly(reference, est_ref_size, paths, threads, i=1):
+def evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i=1):
     print('Comparing assemblies... ')
     asm_dirs = (
      [paths['o'] + '/asm/' + dir + '/contigs.fasta' for dir in
      filter(lambda d: d.startswith(str(i)), os.listdir(paths['o'] + '/asm'))])
     # print(asm_dirs)
     cmd_vars = {
-    'i':str(i),
-    'asm_dirs':' '.join(asm_dirs),
-    'ref_len':est_ref_size,
-    'path_ref':paths['ref'],
-    'path_o':paths['o'],
-    'threads':threads}
-    cmd_eval = ('quast.py {asm_dirs} -o {path_o}/eval/{i} --threads {threads}'.format(**cmd_vars))
+     'i':str(i),
+     'asm_dirs':' '.join(asm_dirs),
+     'ref_len':est_ref_len,
+     'path_ref':paths['ref'],
+     'sample_name':sample_name,
+     'path_o':paths['o'],
+     'threads':threads}
+    cmd_eval = (
+     'quast.py {asm_dirs} -o {path_o}/eval/{i}.{sample_name} '
+     '--threads {threads} '
+     '--gene-finding'.format(**cmd_vars))
     # if ref_found:
     #     cmd_eval += ' -R {path_o}/ref/{i}.{sample_name}.ref.fasta'.format(**cmd_vars)
     if reference:
-        print('REFERENCE')
         cmd_eval += ' -R {path_ref}'.format(**cmd_vars)
-    if est_ref_size:
+    if est_ref_len:
         cmd_eval += ' --est-ref-size {ref_len}'.format(**cmd_vars)
+    cmd_eval += ' --min-contig 50' # Just for testing
     cmd_eval += ' &> /dev/null'
-    print(cmd_eval)
     cmd_eval = os.system(cmd_eval)
     print('\tDone') if cmd_eval == 0 else sys.exit('ERR_EVAL')
 
-def remap_reads():
-    pass
-
-def evaluate_assemblies(paths, i):
-    os.makedirs(paths['o'] + '/eval/summary/')
+def evaluate_all_assemblies(reference, est_ref_len, sample_name, paths, threads, i=1):
+    print('Comparing all assemblies... ')
+    asm_dirs = (
+    [paths['o'] + '/asm/' + dir + '/contigs.fasta' for dir in
+    filter(lambda d: d[0].isdigit(), os.listdir(paths['o'] + '/asm'))])
+    print(asm_dirs)
     cmd_vars = {
      'i':str(i),
-     'path_o':paths['o']}
-    cmd_report = (
-     'cp {path_o}/eval/{i}/report.html {path_o}/eval/{i}/transposed_report.tsv '
-     '{path_o}/eval/summary/ && cp -R {path_o}/eval/{i}/report_html_aux '
-     '{path_o}/eval/summary/'.format(**cmd_vars))
-    cmd_report = os.system(cmd_report)
-    print('Reporting...')
-    print('\tQUAST report: ' + paths['o'] + '/eval/summary/')
+     'asm_dirs':' '.join(asm_dirs),
+     'ref_len':est_ref_len,
+     'path_ref':paths['ref'],
+     'sample_name':sample_name,
+     'path_o':paths['o'],
+     'threads':threads}
+    cmd_eval = (
+     'quast.py {asm_dirs} -o {path_o}/eval/ '
+     '--threads {threads} '
+     '--gene-finding'.format(**cmd_vars))
+    if reference:
+        cmd_eval += ' -R {path_ref}'.format(**cmd_vars)
+    if est_ref_len:
+        cmd_eval += ' --est-ref-size {ref_len}'.format(**cmd_vars)
+    cmd_eval += ' --min-contig 50' # Just for testing
+    cmd_eval += ' &> /dev/null'
+    print(cmd_eval)
+    cmd_eval = os.system(cmd_eval)
+    print('\tDone') if cmd_eval == 0 else sys.exit('ERR_EVAL_SUMMARY')
+
+# def evaluate_all_assemblies(paths, i):
+#     os.makedirs(paths['o'] + '/eval/summary/')
+#     cmd_vars = {
+#      'i':str(i),
+#      'path_o':paths['o']}
+#     cmd_report = (
+#      'cp {path_o}/eval/{i}/report.html {path_o}/eval/{i}/transposed_report.tsv '
+#      '{path_o}/eval/summary/ && cp -R {path_o}/eval/{i}/report_html_aux '
+#      '{path_o}/eval/summary/'.format(**cmd_vars))
+#     cmd_report = os.system(cmd_report)
+#     print('Reporting...')
+#     print('\tQUAST report: ' + paths['o'] + '/eval/summary/')
 
 def report(start_time, end_time, paths):
     elapsed_time = end_time - start_time
@@ -401,7 +460,7 @@ def report(start_time, end_time, paths):
 
 def main(fwd_reads=None, rev_reads=None, reads_dir=None, out_dir='output', fwd_reads_sig='_F',
     rev_reads_sig='_R', norm_k_list=None, norm_cov_list=None, asm_k_list=None,
-    reference=None, asm_using_ref=False, est_ref_size=None,
+    reference=None, reference_guided_asm=False, est_ref_len=None,
     map_before_asm=False, map_after_asm=False,
     hcv=False, threads=1):
    
@@ -411,7 +470,7 @@ def main(fwd_reads=None, rev_reads=None, reads_dir=None, out_dir='output', fwd_r
     print('\tMultiple input samples') if multiple_samples else print('\tSingle sample')
     print('\tPaired read signatures: \'' + fwd_reads_sig + '\', \'' + rev_reads_sig + '\'')
     print('\tVirus agnostic') if not hcv else print('Using HCV-specific features')
-    print('\t' + str(threads) + ' threads')
+    print('\t' + str(threads) + ' threads available')
    
     start_time = time.time()
     paths = {
@@ -427,7 +486,7 @@ def main(fwd_reads=None, rev_reads=None, reads_dir=None, out_dir='output', fwd_r
     'n_reads_sample':None,
     'ref_found':None,
     'top_ref_accession':None,
-    'top_genotype':None,
+    'top_hcv_genotype':None,
     'ref_path':None,
     'ref_len':None}
 
@@ -440,22 +499,24 @@ def main(fwd_reads=None, rev_reads=None, reads_dir=None, out_dir='output', fwd_r
     for sample_name, fastq_names in state['fastqs'].items():
         i += 1
         import_reads(multiple_samples, sample_name, fastq_names, paths, i)
-        state['n_reads'] = count_reads(sample_name, paths, i)
-        if hcv:
-            state['n_reads_sample'] = sample_reads(state['n_reads'], paths, i)
-            blast_references(paths, threads, i)
-            state['ref_found'], state['top_ref_accession'] = choose_reference(paths, i)
+        state['n_reads'] = hcv_count_reads(sample_name, paths, i)
+        if reference and not hcv:
+            map_reads(reference, sample_name, paths, threads, i)
+        elif hcv:
+            state['n_reads_sample'] = hcv_sample_reads(state['n_reads'], paths, i)
+            hcv_blast_references(paths, threads, i)
+            state['ref_found'], state['top_ref_accession'] = hcv_choose_reference(paths, i)
             if state['ref_found']:
-                state['ref_path'], state['ref_len'] = extract_reference(state['top_ref_accession'], paths, i)
-                state['top_genotype'] = genotype(state['n_reads'], state['n_reads_sample'], paths, i)
-                map_reads(state['ref_path'], paths, threads, i)
-                assess_coverage(state['ref_len'], paths, i)
+                state['ref_path'], state['ref_len'] = hcv_extract_reference(state['top_ref_accession'], paths, i)
+                state['top_hcv_genotype'] = hcv_genotype(state['n_reads'], state['n_reads_sample'], paths, i)
+                hcv_map_reads(state['ref_path'], paths, threads, i)
+                hcv_assess_coverage(state['ref_len'], paths, i)
         trim(sample_name, paths, i)
         # Ref_found needs cleaning up
-        assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, i), asm_k_list, asm_using_ref,
+        assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, i), asm_k_list, reference_guided_asm,
                  state['ref_found'], sample_name, paths, threads, i)
-        evaluate_assembly(reference, est_ref_size, paths, threads, i)        
-    evaluate_assemblies(paths, i) if multiple_samples else None
+        evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i)        
+    evaluate_all_assemblies(reference, est_ref_len, sample_name, paths, threads, i)
     report(start_time, time.time(), paths)
 
 argh.dispatch_command(main)
