@@ -66,7 +66,6 @@ def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
 
 def choose_assembly(est_ref_len, sample_name, paths, threads, i=1):
     print('Choosing best assembly...')
-    # asm_report_path = paths['o'] + '/eval/' + str(i) + '.' + sample_name + '/transposed_report.tsv'
     longest_contigs = {}
     contigs_paths = ([
     paths['o'] + '/asm/' +  dir + '/contigs.fasta' for dir in
@@ -83,24 +82,82 @@ def choose_assembly(est_ref_len, sample_name, paths, threads, i=1):
                     longest_contig_name = record.id
         longest_contigs[asm_name] = (longest_contig_name, longest_contig_len)
     contig_differences = {s: abs(int(est_ref_len)-int(c[1])) for s, c in longest_contigs.items()}
-    putatively_optimal_asm = min(contig_differences, key=lambda k: contig_differences[k])
-    putatively_optimal_asm_path = paths['o'] + '/asm/' + putatively_optimal_asm + '/contigs.fasta'
-    putatively_optimal_contig = longest_contigs[putatively_optimal_asm]
+    best_asm = min(contig_differences, key=lambda k: contig_differences[k])
+    best_asm_path = paths['o'] + '/asm/' + best_asm + '/contigs.fasta'
+    best_contig = longest_contigs[best_asm]
     
-    # Extract chosen contig from assembly multifasta and write to remap/ dir
-    with open(putatively_optimal_asm_path, 'r') as putatively_optimal_asm_file:
-        for record in SeqIO.parse(putatively_optimal_asm_file, 'fasta'):
-            if record.id == putatively_optimal_contig[0]:
-                with open(paths['o'] + '/remap/' + str(i) + '.fasta', 'w') as asm_ref_file:
+    with open(best_asm_path, 'r') as best_asm_file:
+        for record in SeqIO.parse(best_asm_file, 'fasta'):
+            if record.id == best_contig[0]:
+                with open(paths['o'] + '/remap/' + str(i) + '.contig.fasta', 'w') as asm_ref_file:
                     SeqIO.write(record, asm_ref_file, 'fasta')
 
-    print('\tPutatative best assembly: ' + putatively_optimal_asm)
-    print('\tPutatative best contig name: ' + str(putatively_optimal_contig[0]))
-    print('\tPutatative best contig length: ' + str(putatively_optimal_contig[1]))
-    return putatively_optimal_asm, putatively_optimal_contig[0], putatively_optimal_contig[1]
+    print('\tPutative best assembly: ' + best_asm)
+    print('\tPutative best contig name: ' + str(best_contig[0]))
+    print('\tPutative best contig length: ' + str(best_contig[1]))
+    return best_asm, best_contig[0], best_contig[1]
 
-def map_reads_to_assembly():
-    pass
+def map_reads_to_assembly(sample_name, paths, threads, i=1):
+    print('Aligning to best assembled contig... (Bowtie2)')
+    cmd_vars = {
+     'i':str(i),
+     'sample_name':sample_name,
+     'path_pipe':paths['pipe'],
+     'path_o':paths['o'],
+     'threads':threads}
+    cmds = [
+     'bowtie2-build -q {path_o}/remap/{i}.contig.fasta {i}.contig &> /dev/null',
+     'bowtie2 -x {i} -S {path_o}/remap/{i}.sam --no-unal --threads 12 --local '
+     '-1 {path_o}/merge/{i}.{sample_name}.raw.r1.fastq '
+     '-2 {path_o}/merge/{i}.{sample_name}.raw.r2.fastq &> /dev/null',
+     'grep -v XS:i: {path_o}/remap/{i}.sam > {path_o}/remap/{i}.uniq.sam',
+     'samtools view -bS {path_o}/remap/{i}.uniq.sam | samtools sort - {path_o}/remap/{i}.uniq',
+     'samtools index {path_o}/remap/{i}.uniq.bam',
+     'samtools mpileup -d 1000 -f {path_o}/remap/{i}.contig.fasta {path_o}/remap/{i}.uniq.bam '
+     '2> /dev/null > {path_o}/remap/{i}.uniq.pile',
+     'samtools mpileup -ud 1000 -f {path_o}/remap/{i}.contig.fasta {path_o}/remap/{i}.uniq.bam '
+     '2> /dev/null | bcftools call -c | vcfutils.pl vcf2fq '
+     '| seqtk seq -a - > {path_o}/remap/{i}.denovo.consensus.fasta']
+    for j, cmd in enumerate(cmds, start=1):
+        cmd_map = os.system(cmd.format(**cmd_vars))
+        print('\tDone (' + cmd.split(' ')[0] + ')') if cmd_map == 0 else sys.exit('ERR_REMAP')
+
+def assess_remap_coverage(best_contig_len, paths, i=1):
+    print('Identifying low coverage regions...')
+    depths = {}
+    max_coverage = None
+    uncovered_sites = []
+    with open(paths['o'] + '/remap/' + str(i) + '.uniq.pile', 'r') as pileup:
+        bases_covered = 0
+        for line in pileup:
+            site = int(line.split('\t')[1])
+            depths[site] = int(line.split('\t')[3])
+            if depths[site] < 1:
+                uncovered_sites.append(site)
+            else:
+                bases_covered += 1
+            if depths[site] > max_coverage:
+                max_coverage = depths[site]
+    prop_coverage = round(bases_covered/best_contig_len, 3)
+    uncovered_region = 0
+    uncovered_regions = []
+    last_uncovered_site = 0
+    largest_uncovered_region = 0
+    for uncovered_site in uncovered_sites:
+        if uncovered_site == last_uncovered_site + 1:
+            uncovered_region += 1
+            if uncovered_region > largest_uncovered_region:
+                largest_uncovered_region = uncovered_region
+        else:
+            if uncovered_region > 0:
+                uncovered_regions.append(uncovered_region)
+            uncovered_region = 1
+        last_uncovered_site = uncovered_site
+    
+    print('\tBases covered: {}/{} ({})'.format(bases_covered, best_contig_len, prop_coverage))
+    print('\tMaximum depth of coverage: ' + str(max_coverage))
+    print('\tUncovered regions: ' + str(len(uncovered_regions)))
+    print('\tLargest uncovered region: ' + str(largest_uncovered_region) + 'bp')
 
 # First arg previosly ref_found
 def evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i=1):
@@ -187,8 +244,7 @@ def main(fwd_reads=None, rev_reads=None, reads_dir=None, out_dir='output', fwd_r
     print('\tReference length: ' + str(est_ref_len))
     print('\tUsing Segemehl') if use_segemehl else print('\tUsing BWA')
     print('\t' + str(threads) + ' threads available')
-   
-    
+
     paths = {
     'in_dir':reads_dir,
     'in_fwd':fwd_reads,
@@ -197,7 +253,7 @@ def main(fwd_reads=None, rev_reads=None, reads_dir=None, out_dir='output', fwd_r
     'pipe':os.path.dirname(os.path.realpath(__file__)),
     'o':out_dir + '/run_' + str(1436296420) + '_gold_no_remap',
     'segemehl':os.path.dirname(os.path.realpath(__file__)) + '/res/segemehl/segemehl.x'}
-    
+
     state = {
     'fastqs':None,
     'n_reads':None,
@@ -212,7 +268,10 @@ def main(fwd_reads=None, rev_reads=None, reads_dir=None, out_dir='output', fwd_r
     i = 0 # counter for file naming
     for sample_name, fastq_names in state['fastqs'].items():
         i += 1
-        choose_assembly(est_ref_len, sample_name, paths, threads, i)
+        best_asm, best_contig_id, best_contig_len = choose_assembly(est_ref_len, sample_name, paths, threads, i)
+        map_reads_to_assembly(sample_name, paths, threads, i)
+        best_contig_len = 9471
+        assess_remap_coverage(best_contig_len, paths, i)
         break
         # evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i)
     # evaluate_all_assemblies(reference, est_ref_len, sample_name, paths, threads, i)

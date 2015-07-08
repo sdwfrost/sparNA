@@ -1,10 +1,14 @@
 #!/usr/bin/env python
 
 # Author: Bede Constantinides
-# Python (2.7+) pipeline for paired-end HepC assembly developed during a placement at PHE
+# Python (2.7+) pipeline for paired-end viral assembly. Includes HCV specific features.
+# Developed in collaboration with Public Health England
 # Please seek permission prior to use or distribution
 
 # TODO
+# | Report % read alignment in mapping to ref and contig
+# | More pipelining to reduce disk I/O
+# | Consistent use of r12 / fr
 # | Fix read remapping
 # | Interleaved reads (ONE TRUE FORMAT)
 # | Python3
@@ -19,7 +23,7 @@
 # | python packages:
 # |    argh, biopython, envoy, khmer, matplotlib
 # | others, expected inside $PATH:
-# |    bwa, blast, samtools, vcftools, bcftools, bedtools, seqtk, spades, quast, parallel (GNU)
+# |    bwa, bowtie2, blast, samtools, vcftools, bcftools, bedtools, seqtk, spades, quast, parallel (GNU)
 # | others, bundled inside res/ directory:
 # |    trimmomatic
 # | others, bundled and requiring compilation: segemehl
@@ -65,7 +69,6 @@ def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
     return fastqs
     
 def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
-    # need to pass in list of files with a good name
     print('Importing reads... (SAMPLE {})'.format(i))
     if multiple_samples:
         fastq_path = paths['in_dir']
@@ -243,13 +246,15 @@ def hcv_assess_coverage(ref_len, paths, i=1):
 
     print('\tUncovered sites: ' + str(len(uncovered_sites)))
     print('\tUncovered regions: ' + str(len(uncovered_regions)))
-    if not uncovered_sites:
-        print('\tAll reference bases covered!')
-    elif len(uncovered_sites) < (1-min_coverage)*ref_len:
-        print('\tReference coverage exceeds threshold')
-    else:
-        print('\tReference coverage below threshold')
-    print('\tDone')
+    print('\tLargest uncovered region: ' + str(largest_uncovered_region))
+
+    # if not uncovered_sites:
+    #     print('\tAll reference bases covered!')
+    # elif len(uncovered_sites) < (1-min_coverage)*ref_len:
+    #     print('\tReference coverage exceeds threshold')
+    # else:
+    #     print('\tReference coverage below threshold')
+    # print('\tDone')
 
 def map_reads(use_segemehl, ref, sample_name, paths, threads, i=1):
     print('Aligning... (Segemehl)') if use_segemehl else print('Aligning... (BWA)')
@@ -383,17 +388,97 @@ def assemble(norm_perms, asm_k_list, asm_using_ref, ref_found, sample_name, path
             process.wait()
             print('\tDone') if process.returncode == 0 else sys.exit('ERR_ASM')
 
-def choose_assembly(sample_name, paths, threads, i=1):
-    pass
-    # for asms in asm_dir:
-    #     extract longest contigs()
-    #     bwa()
-    #     choose assembly with most unique mapppings
+def choose_assembly(est_ref_len, sample_name, paths, threads, i=1):
+    print('Choosing best assembly...')
+    longest_contigs = {}
+    contigs_paths = (
+    [paths['o'] + '/asm/' +  dir + '/contigs.fasta' for dir in
+    filter(lambda d: d.startswith(str(i)), os.listdir(paths['o'] + '/asm'))])
+    longest_contigs = {}
+    for contigs_path in contigs_paths:
+        asm_name = os.path.split(contigs_path)[0].split('/')[-1]
+        with open(contigs_path, 'r') as contigs_file:
+            longest_contig_name = None
+            longest_contig_len = None
+            for record in SeqIO.parse(contigs_file, 'fasta'):
+                if len(record.seq) > longest_contig_len:
+                    longest_contig_len = len(record.seq) 
+                    longest_contig_name = record.id
+        longest_contigs[asm_name] = (longest_contig_name, longest_contig_len)
+    contig_differences = {s: abs(int(est_ref_len)-int(c[1])) for s, c in longest_contigs.items()}
+    best_asm = min(contig_differences, key=lambda k: contig_differences[k])
+    best_asm_path = paths['o'] + '/asm/' + best_asm + '/contigs.fasta'
+    best_contig = longest_contigs[best_asm]
+    
+    with open(best_asm_path, 'r') as best_asm_file:
+        for record in SeqIO.parse(best_asm_file, 'fasta'):
+            if record.id == best_contig[0]:
+                with open(paths['o'] + '/remap/' + str(i) + '.contig.fasta', 'w') as asm_ref_file:
+                    SeqIO.write(record, asm_ref_file, 'fasta')
 
-def map_reads_to_assembly():
-    pass
+    print('\tPutative best assembly: ' + best_asm)
+    print('\tPutative best contig name: ' + str(best_contig[0]))
+    print('\tPutative best contig length: ' + str(best_contig[1]))
+    return best_asm, best_contig[0], best_contig[1]
 
-# First arg previosly ref_found
+def map_reads_to_assembly(sample_name, paths, threads, i=1):
+    print('Aligning to best assembled contig... (Bowtie2)')
+    cmd_vars = {
+     'i':str(i),
+     'sample_name':sample_name,
+     'path_pipe':paths['pipe'],
+     'path_o':paths['o'],
+     'threads':threads}
+    cmds = [
+     'bowtie2-build -q {path_o}/remap/{i}.contig.fasta {i}.contig &> /dev/null',
+     'bowtie2 -x {i} -S {path_o}/remap/{i}.sam --no-unal --threads 12 --local '
+     '-1 {path_o}/merge/{i}.{sample_name}.raw.r1.fastq '
+     '-2 {path_o}/merge/{i}.{sample_name}.raw.r2.fastq &> /dev/null',
+     'grep -v XS:i: {path_o}/remap/{i}.sam > {path_o}/remap/{i}.uniq.sam',
+     'samtools view -bS {path_o}/remap/{i}.uniq.sam | samtools sort - {path_o}/remap/{i}.uniq',
+     'samtools index {path_o}/remap/{i}.uniq.bam',
+     'samtools mpileup -d 1000 -f {path_o}/remap/{i}.contig.fasta {path_o}/remap/{i}.uniq.bam '
+     '2> /dev/null > {path_o}/remap/{i}.uniq.pile',
+     'samtools mpileup -ud 1000 -f {path_o}/remap/{i}.contig.fasta {path_o}/remap/{i}.uniq.bam '
+     '2> /dev/null | bcftools call -c | vcfutils.pl vcf2fq '
+     '| seqtk seq -a - > {path_o}/remap/{i}.denovo.consensus.fasta']
+    for j, cmd in enumerate(cmds, start=1):
+        cmd_map = os.system(cmd.format(**cmd_vars))
+        print('\tDone (' + cmd.split(' ')[0] + ')') if cmd_map == 0 else sys.exit('ERR_REMAP')
+
+def assess_remap_coverage(best_contig_len, paths, i=1):
+    print('Identifying low coverage regions...')
+    depths = {}
+    max_coverage = None
+    uncovered_sites = []
+    with open(paths['o'] + '/remap/' + str(i) + '.uniq.pile', 'r') as pileup:
+        bases_covered = 0
+        for line in pileup:
+            site = int(line.split('\t')[1])
+            depths[site] = int(line.split('\t')[3])
+            if depths[site] < 1:
+                uncovered_sites.append(site)
+            else:
+                bases_covered += 1
+            if depths[site] > max_coverage:
+                max_coverage = depths[site]
+    prop_coverage = round(bases_covered/best_contig_len, 3)
+    uncovered_region = 0
+    uncovered_regions = []
+    last_uncovered_site = 0
+    largest_uncovered_region = 0
+    for uncovered_site in uncovered_sites:
+        if uncovered_site == last_uncovered_site + 1:
+            uncovered_region += 1
+            if uncovered_region > largest_uncovered_region:
+                largest_uncovered_region = uncovered_region
+        else:
+            if uncovered_region > 0:
+                uncovered_regions.append(uncovered_region)
+            uncovered_region = 1
+        last_uncovered_site = uncovered_site
+
+# First arg previously ref_found
 def evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i=1):
     print('Comparing assemblies...')
     asm_dirs = (
@@ -518,6 +603,9 @@ def main(fwd_reads=None, rev_reads=None, reads_dir=None, out_dir='output', fwd_r
         # Ref_found needs cleaning up
         assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, i), asm_k_list, reference_guided_asm,
                  state['ref_found'], sample_name, paths, threads, i)
+        best_asm, best_contig_id, best_contig_len = choose_assembly(est_ref_len, sample_name, paths, threads, i)
+        map_reads_to_assembly(sample_name, paths, threads, i)
+        assess_remap_coverage(best_contig_len, paths, i)
         evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i)        
     evaluate_all_assemblies(reference, est_ref_len, sample_name, paths, threads, i)
     report(start_time, time.time(), paths)
