@@ -84,7 +84,16 @@ def choose_assembly(est_ref_len, sample_name, paths, threads, i=1):
         longest_contigs[asm_name] = (longest_contig_name, longest_contig_len)
     contig_differences = {s: abs(int(est_ref_len)-int(c[1])) for s, c in longest_contigs.items()}
     putatively_optimal_asm = min(contig_differences, key=lambda k: contig_differences[k])
+    putatively_optimal_asm_path = paths['o'] + '/asm/' + putatively_optimal_asm + '/contigs.fasta'
     putatively_optimal_contig = longest_contigs[putatively_optimal_asm]
+    
+    # Extract chosen contig from assembly multifasta and write to remap/ dir
+    with open(putatively_optimal_asm_path, 'r') as putatively_optimal_asm_file:
+        for record in SeqIO.parse(putatively_optimal_asm_file, 'fasta'):
+            if record.id == putatively_optimal_contig[0]:
+                with open(paths['o'] + '/remap/' + str(i) + '.fasta', 'w') as asm_ref_file:
+                    SeqIO.write(record, asm_ref_file, 'fasta')
+
     print('\tPutatative best assembly: ' + putatively_optimal_asm)
     print('\tPutatative best contig name: ' + str(putatively_optimal_contig[0]))
     print('\tPutatative best contig length: ' + str(putatively_optimal_contig[1]))
