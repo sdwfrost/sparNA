@@ -383,10 +383,14 @@ def assemble(norm_perms, asm_k_list, asm_using_ref, ref_found, sample_name, path
             process.wait()
             print('\tDone') if process.returncode == 0 else sys.exit('ERR_ASM')
 
-def choose_assembly():
+def choose_assembly(sample_name, paths, threads, i=1):
     pass
+    # for asms in asm_dir:
+    #     extract longest contigs()
+    #     bwa()
+    #     choose assembly with most unique mapppings
 
-def remap_reads():
+def map_reads_to_assembly():
     pass
 
 # First arg previosly ref_found
