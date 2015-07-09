@@ -65,7 +65,6 @@ def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
         fastqs = zip(fastqs['f'], fastqs['r'])
         fastqs = {os.path.splitext(f[0].replace(fwd_reads_sig,''))[0]: f for f in fastqs}
     print('\tDone') if fastqs else sys.exit('ERR_READS')
-    print('-' * 40)
     return fastqs
     
 def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
@@ -88,7 +87,7 @@ def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
     '{path_o}/merge/{i}.{sample_name}.raw.r12.fastq'
     .format(**cmd_vars))
     cmd_import = os.system(cmd_import)
-    sys.exit('ERR_IMPORT') if cmd_import != 0 else None
+    print('\tDone') if cmd_import == 0 else sys.exit('ERR_IMPORT')
 
 def hcv_count_reads(sample_name, paths, i=1):
     print('Counting reads...')
@@ -405,6 +404,7 @@ def choose_assembly(est_ref_len, sample_name, paths, threads, i=1):
                     longest_contig_len = len(record.seq) 
                     longest_contig_name = record.id
         longest_contigs[asm_name] = (longest_contig_name, longest_contig_len)
+        print(longest_contigs)
     contig_differences = {s: abs(int(est_ref_len)-int(c[1])) for s, c in longest_contigs.items()}
     best_asm = min(contig_differences, key=lambda k: contig_differences[k])
     best_asm_path = paths['o'] + '/asm/' + best_asm + '/contigs.fasta'
@@ -430,10 +430,12 @@ def map_reads_to_assembly(sample_name, paths, threads, i=1):
      'path_o':paths['o'],
      'threads':threads}
     cmds = [
-     'bowtie2-build -q {path_o}/remap/{i}.contig.fasta {i}.contig &> /dev/null',
-     'bowtie2 -x {i} -S {path_o}/remap/{i}.sam --no-unal --threads 12 --local '
+     'bowtie2-build -q {path_o}/remap/{i}.contig.fasta {path_o}/remap/{i}.contig ',
+     # '&> /dev/null',
+     'bowtie2 -x {path_o}/remap/{i}.contig -S {path_o}/remap/{i}.sam --no-unal --threads 12 --local '
      '-1 {path_o}/merge/{i}.{sample_name}.raw.r1.fastq '
-     '-2 {path_o}/merge/{i}.{sample_name}.raw.r2.fastq &> /dev/null',
+     '-2 {path_o}/merge/{i}.{sample_name}.raw.r2.fastq ',
+     # '&> /dev/null ',
      'grep -v XS:i: {path_o}/remap/{i}.sam > {path_o}/remap/{i}.uniq.sam',
      'samtools view -bS {path_o}/remap/{i}.uniq.sam | samtools sort - {path_o}/remap/{i}.uniq',
      'samtools index {path_o}/remap/{i}.uniq.bam',
@@ -541,21 +543,31 @@ def report(start_time, end_time, paths):
         report.write('wall_time\t{}'.format(elapsed_time))
         print('\tWall time: {0:.{1}f}s'.format(elapsed_time, 1))
 
-def main(fwd_reads=None, rev_reads=None, reads_dir=None, out_dir='output', fwd_reads_sig='_F',
-    rev_reads_sig='_R', norm_k_list=None, norm_cov_list=None, asm_k_list=None,
-    use_segemehl=False, reference=None, reference_guided_asm=False, est_ref_len=None,
-    map_before_asm=False, map_after_asm=False,
-    hcv=False, threads=1):
+def main(
+    fwd_reads=None, rev_reads=None, reads_dir=None, out_dir='output',
+    fwd_reads_sig='_F', rev_reads_sig='_R',
+    norm_k_list=None, norm_cov_list=None,
+    asm_k_list=None, reference_guided_asm=False, 
+    reference=None, est_ref_len=None,
+    use_segemehl=False,
+    no_map=False, no_remap=False,
+    hcv=False,
+    threads=1):
    
     multiple_samples = True if reads_dir else False
+    if not est_ref_len and reference:
+        with open(reference, 'r') as reference_file:
+            for record in SeqIO.parse(reference_file, 'fasta'):
+                est_ref_len = len(record.seq)
 
     print('-' * 40)
     print('Run options...')
     print('\tMultiple input samples') if multiple_samples else print('\tSingle sample')
     print('\tPaired read signatures: \'' + fwd_reads_sig + '\', \'' + rev_reads_sig + '\'')
     print('\tVirus agnostic') if not hcv else print('Using HCV-specific features')
-    print('\tUsing Segemehl') if use_segemehl else print('Using BWA')
+    print('\tUsing Segemehl') if use_segemehl else print('\tUsing BWA')
     print('\t' + str(threads) + ' threads available')
+    print('-' * 40)
    
     start_time = time.time()
     
