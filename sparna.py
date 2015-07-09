@@ -6,6 +6,10 @@
 # Please seek permission prior to use or distribution
 
 # TODO
+# | best_contig_len undefined
+# | Send only best contigs per sample to QUAST for final eval step
+# | Write and parse and report Bowtie2 output map and remap
+# | Means of accepting reference path broken in HCV mode by refactor
 # | Report % read alignment in mapping to ref and contig
 # | More pipelining to reduce disk I/O
 # | Consistent use of r12 / fr
@@ -47,7 +51,9 @@ import subprocess
 from Bio import SeqIO
 from Bio.Blast.Applications import NcbiblastnCommandline
 
+
 def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
+    print('-' * 40)
     print('Identifying input...')
     fastqs = {'f':[],'r':[],'fr':[]}
     if paths['in_dir']:
@@ -67,8 +73,12 @@ def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
     print('\tDone') if fastqs else sys.exit('ERR_READS')
     return fastqs
     
+
 def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
-    print('Importing reads... (SAMPLE {})'.format(i))
+    print('Importing reads...')
+    print('\tSample ID: ' + str(i))
+    print('\tSample name: ' + sample_name)
+    print('\tFiles:', fastq_names)
     if multiple_samples:
         fastq_path = paths['in_dir']
     else:
@@ -89,6 +99,7 @@ def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
     cmd_import = os.system(cmd_import)
     print('\tDone') if cmd_import == 0 else sys.exit('ERR_IMPORT')
 
+
 def hcv_count_reads(sample_name, paths, i=1):
     print('Counting reads...')
     cmd_count = ('wc -l {path_o}/merge/{i}.{sample_name}.raw.r12.fastq'
@@ -99,6 +110,7 @@ def hcv_count_reads(sample_name, paths, i=1):
     n_reads = int(cmd_count.std_out.strip().split(' ')[0])/4
     print('\tDone') if cmd_count.status_code == 0 else sys.exit('ERR_COUNT')
     return n_reads
+
 
 def hcv_sample_reads(n_reads, paths, i=1):
     n_reads_sample = 1e4 if n_reads >= 1e4 else n_reads
@@ -112,6 +124,7 @@ def hcv_sample_reads(n_reads, paths, i=1):
     cmd_sample = os.system(cmd_sample)
     print('\tDone') if cmd_sample == 0 else sys.exit('ERR_SAMPLE')
     return n_reads_sample
+
 
 def hcv_blast_references(paths, threads, i=1):
     print('BLASTing reference sequences...')
@@ -129,6 +142,7 @@ def hcv_blast_references(paths, threads, i=1):
     cmd_blastn()
     print('\tDone')
 
+
 def hcv_choose_reference(paths, i=1):
     print('Choosing reference sequence...')
     accession_freqs = {}
@@ -140,14 +154,15 @@ def hcv_choose_reference(paths, i=1):
                     accession_freqs[accession] += 1
                 else: accession_freqs[accession] = 1
     if accession_freqs:
-        ref_found = True
+        hcv_ref_found = True
         top_ref_accession = max(accession_freqs, key=accession_freqs.get)
     else:
-        ref_found = False
+        hcv_ref_found = False
         top_ref_accession = None
         print('\tWARNING: failed to identify a similar reference sequence')
     print('\tDone')
-    return ref_found, top_ref_accession
+    return hcv_ref_found, top_ref_accession
+
 
 def hcv_extract_reference(top_ref_accession, paths, i=1):
     print('Extracting reference ' + top_ref_accession + '...')
@@ -168,30 +183,32 @@ def hcv_extract_reference(top_ref_accession, paths, i=1):
     print('\tDone')
     return ref_path, ref_len
 
+
 def hcv_genotype(n_reads, n_reads_sample, paths, i=1):
     print('Genotyping...')
     prop_reads_sample = n_reads_sample/n_reads
-    hcv_genotype_freqs = {}
+    genotype_freqs = {}
     with open(paths['o'] + '/blast/' + str(i) + '.blast.tsv', 'r') as blast_out:
         for line in blast_out:
             if not line.startswith('#'):
-                hcv_genotype = line.split('\t')[1].split('_')[1].split('.')[0]
-                if hcv_genotype in hcv_genotype_freqs.keys():
-                    hcv_genotype_freqs[hcv_genotype] += 1
-                else: hcv_genotype_freqs[hcv_genotype] = 1
-    top_hcv_genotype = max(hcv_genotype_freqs, key=hcv_genotype_freqs.get) if hcv_genotype_freqs else None
-    hcv_genotype_props = {k: hcv_genotype_freqs[k]/n_reads*100 for k in hcv_genotype_freqs.keys()}
-    hcv_genotype_props_pc = {k: round(hcv_genotype_freqs[k]/n_reads_sample*100, 3) for k in hcv_genotype_freqs.keys()}
-    hcv_genotype_props_pc_sorted = []
-    for hcv_genotype, proportion in reversed(sorted(hcv_genotype_props_pc.items(), key=lambda(k,v):(v,k))):
-        record = (hcv_genotype + ': ' + str(proportion) + '% (' + str(hcv_genotype_freqs[hcv_genotype]) + ')')
-        hcv_genotype_props_pc_sorted.append(record)
+                genotype = line.split('\t')[1].split('_')[1].split('.')[0]
+                if genotype in genotype_freqs.keys():
+                    genotype_freqs[genotype] += 1
+                else: genotype_freqs[genotype] = 1
+    top_genotype = max(genotype_freqs, key=genotype_freqs.get) if genotype_freqs else None
+    genotype_props = {k: genotype_freqs[k]/n_reads*100 for k in genotype_freqs.keys()}
+    genotype_props_pc = {k: round(genotype_freqs[k]/n_reads_sample*100, 3) for k in genotype_freqs.keys()}
+    genotype_props_pc_sorted = []
+    for genotype, proportion in reversed(sorted(genotype_props_pc.items(), key=lambda(k,v):(v,k))):
+        record = (genotype + ': ' + str(proportion) + '% (' + str(genotype_freqs[genotype]) + ')')
+        genotype_props_pc_sorted.append(record)
         print('\t' + record)
-    with open(paths['o'] + '/blast/' + str(i) + '.hcv_genotypes.txt', 'w') as hcv_genotypes_file:
-        for item in hcv_genotype_props_pc_sorted:
-             hcv_genotypes_file.write(item + '\n')
+    with open(paths['o'] + '/blast/' + str(i) + '.genotypes.txt', 'w') as genotypes_file:
+        for item in genotype_props_pc_sorted:
+             genotypes_file.write(item + '\n')
     print('\tDone')
-    return top_hcv_genotype
+    return top_genotype
+
 
 def hcv_map_reads(ref_path, paths, threads, i=1):
     print('Aligning...')
@@ -214,6 +231,7 @@ def hcv_map_reads(ref_path, paths, threads, i=1):
     for j, cmd in enumerate(cmds_map, start=1):
         cmd_map = os.system(cmd.format(**cmd_vars))
         print('\tDone (' + cmd.split(' ')[0] + ')') if cmd_map == 0 else sys.exit('ERR_MAP') # sample_name should be in here
+
 
 def hcv_assess_coverage(ref_len, paths, i=1):
     print('Identifying low coverage regions...')
@@ -255,6 +273,7 @@ def hcv_assess_coverage(ref_len, paths, i=1):
     #     print('\tReference coverage below threshold')
     # print('\tDone')
 
+
 def map_reads(use_segemehl, ref, sample_name, paths, threads, i=1):
     print('Aligning... (Segemehl)') if use_segemehl else print('Aligning... (BWA)')
     cmd_vars = {
@@ -289,6 +308,7 @@ def map_reads(use_segemehl, ref, sample_name, paths, threads, i=1):
         cmd_map = os.system(cmd)
         print('\tDone (' + cmd.split(' ')[0].format(**cmd_vars) + ')') if cmd_map == 0 else sys.exit('ERR_MAP')
 
+
 def trim(sample_name, paths, i=1):
     print('Trimming...')
     cmd_trim = (
@@ -314,6 +334,7 @@ def trim(sample_name, paths, i=1):
     cmd_trim_stats = ''.join(cmd_trim.std_err).split('\n')[25]
     cmd_trim_pp = os.system(cmd_trim_pp)
     print('\tDone') if cmd_trim.status_code == 0 and cmd_trim_pp == 0 else sys.exit('ERR_TRIM')
+
 
 def normalise(norm_k_list, norm_cov_list, sample_name, paths, i=1):
     print('Normalising...')
@@ -353,9 +374,10 @@ def normalise(norm_k_list, norm_cov_list, sample_name, paths, i=1):
             print('\tDone') if process.returncode == 0 else sys.exit('ERR_NORM')
     return norm_perms
 
-def assemble(norm_perms, asm_k_list, asm_using_ref, ref_found, sample_name, paths, threads, i=1):
+
+def assemble(norm_perms, asm_k_list, reference_guided_asm, reference, sample_name, paths, threads, i=1):
     print('Assembling...')
-    if ref_found and asm_using_ref:
+    if reference and reference_guided_asm:
         asm_perms = [{'k':p['k'],'c':p['c'],'rg':rg} for p in norm_perms for rg in [1, 0]]
     else:
         asm_perms = [{'k':p['k'],'c':p['c'],'rg':rg} for p in norm_perms for rg in [0]]
@@ -368,6 +390,7 @@ def assemble(norm_perms, asm_k_list, asm_using_ref, ref_found, sample_name, path
          'rg':str(asm_perm['rg']),
          'asm_k_list':asm_k_list,
          'path_o':paths['o'],
+         'path_ref':paths['ref'],
          'sample_name':sample_name,
          'threads':threads}
         cmd_asm = (
@@ -378,7 +401,7 @@ def assemble(norm_perms, asm_k_list, asm_using_ref, ref_found, sample_name, path
          '-o {path_o}/asm/{i}.{sample_name}.norm_k{k}c{c}.asm_k{asm_k_list}.rg{rg} --careful'
          .format(**cmd_vars))
         if asm_perm['rg']:
-            cmd_asm += ' --untrusted-contigs ' + paths['o'] + '/ref/' + str(i) + '.ref.fasta'
+            cmd_asm += ' --untrusted-contigs {path_ref}'.format(**cmd_vars)
         cmds_asm.append(cmd_asm)
         print('\tAssembling norm_k={k},norm_c={c},asm_k={asm_k_list},rg={rg}'.format(**cmd_vars))
     with open(os.devnull, 'w') as devnull:
@@ -386,6 +409,7 @@ def assemble(norm_perms, asm_k_list, asm_using_ref, ref_found, sample_name, path
         for process in processes:
             process.wait()
             print('\tDone') if process.returncode == 0 else sys.exit('ERR_ASM')
+
 
 def choose_assembly(est_ref_len, sample_name, paths, threads, i=1):
     print('Choosing best assembly...')
@@ -421,6 +445,7 @@ def choose_assembly(est_ref_len, sample_name, paths, threads, i=1):
     print('\tPutative best contig length: ' + str(best_contig[1]))
     return best_asm, best_contig[0], best_contig[1]
 
+
 def map_reads_to_assembly(sample_name, paths, threads, i=1):
     print('Aligning to best assembled contig... (Bowtie2)')
     cmd_vars = {
@@ -448,6 +473,7 @@ def map_reads_to_assembly(sample_name, paths, threads, i=1):
         cmd_map = os.system(cmd.format(**cmd_vars))
         print('\tDone (' + cmd.split(' ')[0] + ')') if cmd_map == 0 else sys.exit('ERR_REMAP')
 
+
 def assess_remap_coverage(best_contig_len, paths, i=1):
     print('Identifying low coverage regions...')
     depths = {}
@@ -464,6 +490,7 @@ def assess_remap_coverage(best_contig_len, paths, i=1):
                 bases_covered += 1
             if depths[site] > max_coverage:
                 max_coverage = depths[site]
+    
     prop_coverage = round(bases_covered/best_contig_len, 3)
     uncovered_region = 0
     uncovered_regions = []
@@ -479,8 +506,13 @@ def assess_remap_coverage(best_contig_len, paths, i=1):
                 uncovered_regions.append(uncovered_region)
             uncovered_region = 1
         last_uncovered_site = uncovered_site
+    
+    print('\tBases covered: {}/{} ({})'.format(bases_covered, best_contig_len, prop_coverage))
+    print('\tMaximum depth of coverage: ' + str(max_coverage))
+    print('\tUncovered regions: ' + str(len(uncovered_regions)))
+    print('\tLargest uncovered region: ' + str(largest_uncovered_region) + 'bp')
 
-# First arg previously ref_found
+
 def evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i=1):
     print('Comparing assemblies...')
     asm_dirs = (
@@ -499,7 +531,7 @@ def evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i=1
      'quast.py {asm_dirs} -o {path_o}/eval/{i}.{sample_name} '
      '--threads {threads} '
      '--gene-finding'.format(**cmd_vars))
-    # if ref_found:
+    # if reference:
     #     cmd_eval += ' -R {path_o}/ref/{i}.{sample_name}.ref.fasta'.format(**cmd_vars)
     if reference:
         cmd_eval += ' -R {path_ref}'.format(**cmd_vars)
@@ -509,6 +541,7 @@ def evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i=1
     cmd_eval += ' &> /dev/null'
     cmd_eval = os.system(cmd_eval)
     print('\tDone') if cmd_eval == 0 else sys.exit('ERR_EVAL')
+
 
 def evaluate_all_assemblies(reference, est_ref_len, sample_name, paths, threads, i=1):
     print('Comparing all assemblies...')
@@ -537,11 +570,13 @@ def evaluate_all_assemblies(reference, est_ref_len, sample_name, paths, threads,
     cmd_eval = os.system(cmd_eval)
     print('\tDone') if cmd_eval == 0 else sys.exit('ERR_EVAL_SUMMARY')
 
+
 def report(start_time, end_time, paths):
     elapsed_time = end_time - start_time
     with open(paths['o'] + '/summary.txt', 'w') as report:
         report.write('wall_time\t{}'.format(elapsed_time))
         print('\tWall time: {0:.{1}f}s'.format(elapsed_time, 1))
+
 
 def main(
     fwd_reads=None, rev_reads=None, reads_dir=None, out_dir='output',
@@ -567,7 +602,6 @@ def main(
     print('\tVirus agnostic') if not hcv else print('Using HCV-specific features')
     print('\tUsing Segemehl') if use_segemehl else print('\tUsing BWA')
     print('\t' + str(threads) + ' threads available')
-    print('-' * 40)
    
     start_time = time.time()
     
@@ -580,42 +614,41 @@ def main(
     'o':out_dir + '/run_' + str(int(time.time())),
     'segemehl':os.path.dirname(os.path.realpath(__file__)) + '/res/segemehl/segemehl.x'}
     
-    state = {
-    'fastqs':None,
-    'n_reads':None,
-    'n_reads_sample':None,
-    'ref_found':None,
-    'top_ref_accession':None,
-    'top_hcv_genotype':None,
-    'ref_path':None,
-    'ref_len':None}
+    fastqs = None
+    n_reads = None
+    n_reads_sample = None
+    hcv_ref_found = None
+    hcv_ref_len = None
+    hcv_ref_path = None
+    hcv_top_accession = None
+    hcv_top_genotype = None
 
     job_dirs = ['merge', 'sample', 'blast', 'ref', 'map', 'trim', 'norm', 'asm', 'remap', 'eval']
     for dir in job_dirs:
         os.makedirs(paths['o'] + '/' + dir)
 
-    state['fastqs'] = list_fastqs(fwd_reads_sig, rev_reads_sig, paths)
-    i = 0 # counter for file naming
-    for sample_name, fastq_names in state['fastqs'].items():
+    best_asms = {}
+    fastqs = list_fastqs(fwd_reads_sig, rev_reads_sig, paths)
+    i = 0 # For sample IDs
+    for sample_name, fastq_names in fastqs.items():
         i += 1
         import_reads(multiple_samples, sample_name, fastq_names, paths, i)
-        state['n_reads'] = hcv_count_reads(sample_name, paths, i)
-        if reference and not hcv:
-            map_reads(use_segemehl, reference, sample_name, paths, threads, i)
-        elif hcv:
-            state['n_reads_sample'] = hcv_sample_reads(state['n_reads'], paths, i)
+        n_reads = hcv_count_reads(sample_name, paths, i)
+        if hcv:    
+            n_reads_sample = hcv_sample_reads(n_reads, paths, i)
             hcv_blast_references(paths, threads, i)
-            state['ref_found'], state['top_ref_accession'] = hcv_choose_reference(paths, i)
-            if state['ref_found']:
-                state['ref_path'], state['ref_len'] = hcv_extract_reference(state['top_ref_accession'], paths, i)
-                state['top_hcv_genotype'] = hcv_genotype(state['n_reads'], state['n_reads_sample'], paths, i)
-                hcv_map_reads(state['ref_path'], paths, threads, i)
-                hcv_assess_coverage(state['ref_len'], paths, i)
+            hcv_ref_found, hcv_top_accession = hcv_choose_reference(paths, i)
+            if hcv_ref_found:
+                ref_path, ref_len = hcv_extract_reference(hcv_top_accession, paths, i)
+                hcv_top_genotype = hcv_genotype(n_reads, n_reads_sample, paths, i)
+                hcv_map_reads(ref_path, paths, threads, i)
+                hcv_assess_coverage(ref_len, paths, i)
+        elif reference:
+            map_reads(use_segemehl, reference, sample_name, paths, threads, i)
         trim(sample_name, paths, i)
-        # Ref_found needs cleaning up
-        assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, i), asm_k_list, reference_guided_asm,
-                 state['ref_found'], sample_name, paths, threads, i)
-        best_asm, best_contig_id, best_contig_len = choose_assembly(est_ref_len, sample_name, paths, threads, i)
+        assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, i),
+                 asm_k_list, reference_guided_asm, reference, sample_name, paths, threads, i)
+        best_asms[sample_name] = choose_assembly(est_ref_len, sample_name, paths, threads, i)
         map_reads_to_assembly(sample_name, paths, threads, i)
         assess_remap_coverage(best_contig_len, paths, i)
         evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i)        
