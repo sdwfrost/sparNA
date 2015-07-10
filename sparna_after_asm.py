@@ -196,7 +196,7 @@ def evaluate_all_assemblies(reference, est_ref_len, sample_name, paths, threads,
     asm_dirs = (
     [paths['o'] + '/asm/' + dir + '/contigs.fasta' for dir in
     filter(lambda d: d[0].isdigit(), os.listdir(paths['o'] + '/asm'))])
-    print(asm_dirs)
+    # print(asm_dirs)
     cmd_vars = {
      'i':str(i),
      'asm_dirs':' '.join(asm_dirs),

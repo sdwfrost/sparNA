@@ -3,20 +3,22 @@
 # Author: Bede Constantinides
 # Python (2.7+) pipeline for paired-end viral assembly. Includes HCV specific features.
 # Developed in collaboration with Public Health England
-# Please seek permission prior to use or distribution
 
 # TODO
+# | GZIP support
+# | Fully migrate to bwa for mapping... Base reports on samtools flagsts?
 # | best_contig_len undefined
 # | Send only best contigs per sample to QUAST for final eval step
 # | Write and parse and report Bowtie2 output map and remap
+# | Send coverage stats to file
 # | Means of accepting reference path broken in HCV mode by refactor
 # | Report % read alignment in mapping to ref and contig
-# | More pipelining to reduce disk I/O
+# | More pipelining to reduce disk I/O (mainly SAMtools)
 # | Consistent use of r12 / fr
 # | Fix read remapping
 # | Interleaved reads (ONE TRUE FORMAT)
 # | Python3
-# | stop using envoy
+# | stop using envoy, os.system()
 # | add minimum similarity threshold for reference selection
 # | report on trimming, %remapped
 # | increase khmer table size
@@ -75,6 +77,7 @@ def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
     
 
 def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
+    print('-' * 40)
     print('Importing reads...')
     print('\tSample ID: ' + str(i))
     print('\tSample name: ' + sample_name)
@@ -88,12 +91,14 @@ def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
     'sample_name':sample_name,
     'fastq_path_f':fastq_path + '/' + fastq_names[0],
     'fastq_path_r':fastq_path + '/' + fastq_names[1],
-    'path_o':paths['o']}
+    'path_o':paths['o'],
+    'path_pipe':paths['pipe']}
     cmd_import = (
     'cp {fastq_path_f} {path_o}/merge/{i}.{sample_name}.raw.r1.fastq && '
     'cp {fastq_path_r} {path_o}/merge/{i}.{sample_name}.raw.r2.fastq && '
-    'interleave-reads.py {path_o}/merge/{i}.{sample_name}.raw.r1.fastq '
-    '{path_o}/merge/{i}.{sample_name}.raw.r2.fastq 2> /dev/null > '
+    # 'interleave-reads.py {path_o}/merge/{i}.{sample_name}.raw.r1.fastq '
+    '{path_pipe}/res/interleave.py {path_o}/merge/{i}.{sample_name}.raw.r1.fastq '
+    '{path_o}/merge/{i}.{sample_name}.raw.r2.fastq > '
     '{path_o}/merge/{i}.{sample_name}.raw.r12.fastq'
     .format(**cmd_vars))
     cmd_import = os.system(cmd_import)
@@ -324,14 +329,17 @@ def trim(sample_name, paths, i=1):
     cmd_trim_pp = (
      'cat {path_o}/trim/{i}.{sample_name}.trim.r1_se.fastq {path_o}/trim/{i}.{sample_name}.trim.r2_se.fastq > '
      '{path_o}/trim/{i}.{sample_name}.trim.se.fastq '
-     '&& interleave-reads.py {path_o}/trim/{i}.{sample_name}.trim.r1_pe.fastq '
-     '{path_o}/trim/{i}.{sample_name}.trim.r2_pe.fastq 2> /dev/null > {path_o}/trim/{i}.{sample_name}.trim.r12_pe.fastq'
+     # '&& interleave-reads.py {path_o}/trim/{i}.{sample_name}.trim.r1_pe.fastq '
+     # '{path_o}/trim/{i}.{sample_name}.trim.r2_pe.fastq 2> /dev/null > {path_o}/trim/{i}.{sample_name}.trim.r12_pe.fastq'
+     '&& {path_pipe}/res/interleave.py {path_o}/trim/{i}.{sample_name}.trim.r1_pe.fastq '
+     '{path_o}/trim/{i}.{sample_name}.trim.r2_pe.fastq > {path_o}/trim/{i}.{sample_name}.trim.r12_pe.fastq'
      .format(i=str(i), 
              path_pipe=paths['pipe'],
              path_o=paths['o'],
              sample_name=sample_name))
     cmd_trim = envoy.run(cmd_trim)
     cmd_trim_stats = ''.join(cmd_trim.std_err).split('\n')[25]
+    print(cmd_trim.std_out, cmd_trim.std_err)
     cmd_trim_pp = os.system(cmd_trim_pp)
     print('\tDone') if cmd_trim.status_code == 0 and cmd_trim_pp == 0 else sys.exit('ERR_TRIM')
 
@@ -351,7 +359,7 @@ def normalise(norm_k_list, norm_cov_list, sample_name, paths, i=1):
          'path_o':paths['o'],
          'sample_name':sample_name}
         cmd_norm = (
-         'normalize-by-median.py -C {c} -k {k} -N 1 -x 1e9 -p '
+         'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9 -p '
          '{path_o}/trim/{i}.{sample_name}.trim.r12_pe.fastq '
          '-o {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r12_pe.fastq &> /dev/null '
          '&& normalize-by-median.py -C {c} -k {k} -N 1 -x 1e9 '
@@ -428,7 +436,7 @@ def choose_assembly(est_ref_len, sample_name, paths, threads, i=1):
                     longest_contig_len = len(record.seq) 
                     longest_contig_name = record.id
         longest_contigs[asm_name] = (longest_contig_name, longest_contig_len)
-        print(longest_contigs)
+        # print(longest_contigs)
     contig_differences = {s: abs(int(est_ref_len)-int(c[1])) for s, c in longest_contigs.items()}
     best_asm = min(contig_differences, key=lambda k: contig_differences[k])
     best_asm_path = paths['o'] + '/asm/' + best_asm + '/contigs.fasta'
@@ -455,12 +463,12 @@ def map_reads_to_assembly(sample_name, paths, threads, i=1):
      'path_o':paths['o'],
      'threads':threads}
     cmds = [
-     'bowtie2-build -q {path_o}/remap/{i}.contig.fasta {path_o}/remap/{i}.contig ',
-     # '&> /dev/null',
+     'bowtie2-build -q {path_o}/remap/{i}.contig.fasta {path_o}/remap/{i}.contig &> /dev/null',
      'bowtie2 -x {path_o}/remap/{i}.contig -S {path_o}/remap/{i}.sam --no-unal --threads 12 --local '
      '-1 {path_o}/merge/{i}.{sample_name}.raw.r1.fastq '
-     '-2 {path_o}/merge/{i}.{sample_name}.raw.r2.fastq ',
-     # '&> /dev/null ',
+     '-2 {path_o}/merge/{i}.{sample_name}.raw.r2.fastq '
+     '2> {path_o}/remap/{i}.{sample_name}.bt2.stats',
+     'echo -e "\t $(tail -n 1 {path_o}/remap/{i}.{sample_name}.bt2.stats)"',
      'grep -v XS:i: {path_o}/remap/{i}.sam > {path_o}/remap/{i}.uniq.sam',
      'samtools view -bS {path_o}/remap/{i}.uniq.sam | samtools sort - {path_o}/remap/{i}.uniq',
      'samtools index {path_o}/remap/{i}.uniq.bam',
@@ -548,7 +556,7 @@ def evaluate_all_assemblies(reference, est_ref_len, sample_name, paths, threads,
     asm_dirs = (
     [paths['o'] + '/asm/' + dir + '/contigs.fasta' for dir in
     filter(lambda d: d[0].isdigit(), os.listdir(paths['o'] + '/asm'))])
-    print(asm_dirs)
+    # print(asm_dirs)
     cmd_vars = {
      'i':str(i),
      'asm_dirs':' '.join(asm_dirs),
@@ -649,8 +657,8 @@ def main(
         assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, i),
                  asm_k_list, reference_guided_asm, reference, sample_name, paths, threads, i)
         best_asms[sample_name] = choose_assembly(est_ref_len, sample_name, paths, threads, i)
-        map_reads_to_assembly(sample_name, paths, threads, i)
-        assess_remap_coverage(best_contig_len, paths, i)
+        # map_reads_to_assembly(sample_name, paths, threads, i)
+        # assess_remap_coverage( best_asms[sample_name][2], paths, i)
         evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i)        
     evaluate_all_assemblies(reference, est_ref_len, sample_name, paths, threads, i)
     report(start_time, time.time(), paths)
