@@ -1,37 +1,8 @@
 #!/usr/bin/env python
 
-# Author: Bede Constantinides
-# Python (2.7+) pipeline for paired-end HepC assembly developed during a placement at PHE
-# Please seek permission prior to use or distribution
-
-# TODO
-# | Fix read remapping
-# | Interleaved reads (ONE TRUE FORMAT)
-# | Python3
-# | stop using envoy
-# | add minimum similarity threshold for reference selection
-# | report on trimming, %remapped
-# | increase khmer table size
-# | TESTS
-# | Which reference to use in QUAST... ref_found?
-
-# DEPENDENCIES
-# | python packages:
-# |    argh, biopython, envoy, khmer, matplotlib
-# | others, expected inside $PATH:
-# |    bwa, blast, samtools, vcftools, bcftools, bedtools, seqtk, spades, quast, parallel (GNU)
-# | others, bundled inside res/ directory:
-# |    trimmomatic
-# | others, bundled and requiring compilation: segemehl
-
-# USAGE: ./pipeline.py --threads 12 --fwd-reads-sig _F --rev-reads-sig _R --norm-k-list 31 --norm-c-list 5 --asm-k-list 33 --multiple-samples --in-dir /path/to/fastqs --out-dir /path/to/output
-# Input fastq filenames should have an extension and a signature to allow identification of forward and reverse reads
-
-# time ./pipeline.py --hcv --fwd-reads-sig _F --rev-reads-sig _R --norm-k-list 25,31 --norm-c-list 5,10,15,20 --asm-k-list 33,43 --multiple-samples --in-dir /Users/Bede/Research/Analyses/phe_asm/phe_hcv_pipeline/input --out-dir /Users/Bede/Research/Analyses/phe_asm/phe_hcv_pipeline/tmp --threads 12
-
-# min_cov
-# segemehl -A -D -E values
-# min_depth
+# SparNA: A pipeline for assembling deep-sequenced viral amplicon reads
+# Copyright 2015 Bede Constantinides (b|at|bede|dot|im)
+# Distributed under the GNU General Public License version 3 (see LICENSE)
 
 from __future__ import division, print_function
 import os
