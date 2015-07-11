@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 
-# SparNA: A pipeline for assembling deep-sequenced viral amplicon reads.
-# Copyright 2015 Bede Constantinides. Distributed under the GNU General Public License version 3
+# SparNA: A pipeline for assembling deep-sequenced viral amplicon reads
+# Copyright 2015 Bede Constantinides (b|at|bede|dot|im)
+# Distributed under the GNU General Public License version 3 (see LICENSE)
 
 # DEPENDENCIES
 # | python packages:
@@ -20,8 +21,8 @@
 # | IMPLEMENTATION
 #  | Improve error handling 
 #  | Replace envoy.send() and os.system() calls with vanilla subprocess
-#  | Migrate to BWA only for mapping... Base reports on samtools flagsts?
-#  | Consistently use of r12 / fr pairing terminologuy
+#  | Migrate to BWA only for mapping... Base reports on samtools flagstats?
+#  | Consistent use of r12 / fr pairing nomenclature
 #  | Support for gzipped, interleaved input (ONE TRUE FORMAT)
 #  | Use khmer's interleave-reads.py once bug in pair handling is fixed in v2.0
 #  | Tests
