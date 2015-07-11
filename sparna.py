@@ -1,47 +1,43 @@
 #!/usr/bin/env python
 
-# Author: Bede Constantinides
-# Python (2.7+) pipeline for paired-end viral assembly. Includes HCV specific features.
-# Developed in collaboration with Public Health England
-
-# TODO
-# | GZIP support
-# | Fully migrate to bwa for mapping... Base reports on samtools flagsts?
-# | best_contig_len undefined
-# | Send only best contigs per sample to QUAST for final eval step
-# | Write and parse and report Bowtie2 output map and remap
-# | Send coverage stats to file
-# | Means of accepting reference path broken in HCV mode by refactor
-# | Report % read alignment in mapping to ref and contig
-# | More pipelining to reduce disk I/O (mainly SAMtools)
-# | Consistent use of r12 / fr
-# | Fix read remapping
-# | Interleaved reads (ONE TRUE FORMAT)
-# | Python3
-# | stop using envoy, os.system()
-# | add minimum similarity threshold for reference selection
-# | report on trimming, %remapped
-# | increase khmer table size
-# | TESTS
-# | Which reference to use in QUAST... ref_found?
+# SparNA: A pipeline for assembling deep-sequenced viral amplicon reads.
+# Copyright 2015 Bede Constantinides. Distributed under the GNU General Public License version 3
 
 # DEPENDENCIES
 # | python packages:
 # |    argh, biopython, envoy, khmer, matplotlib
 # | others, expected inside $PATH:
-# |    bwa, bowtie2, blast, samtools, vcftools, bcftools, bedtools, seqtk, spades, quast, parallel (GNU)
+# |    bwa, bowtie2, blast, samtools, vcftools, bcftools, bedtools, seqtk, spades, quast
 # | others, bundled inside res/ directory:
 # |    trimmomatic
-# | others, bundled and requiring compilation: segemehl
+# | others, bundled and requiring compilation: segemehl (optional)
 
-# USAGE: ./pipeline.py --threads 12 --fwd-reads-sig _F --rev-reads-sig _R --norm-k-list 31 --norm-c-list 5 --asm-k-list 33 --multiple-samples --in-dir /path/to/fastqs --out-dir /path/to/output
-# Input fastq filenames should have an extension and a signature to allow identification of forward and reverse reads
+# TODO
+# | DOCUMENTATION
+#  | Code comments
+#  | Argument parsing 
+#  | --help page
+# | IMPLEMENTATION
+#  | Improve error handling 
+#  | Replace envoy.send() and os.system() calls with vanilla subprocess
+#  | Migrate to BWA only for mapping... Base reports on samtools flagsts?
+#  | Consistently use of r12 / fr pairing terminologuy
+#  | Support for gzipped, interleaved input (ONE TRUE FORMAT)
+#  | Use khmer's interleave-reads.py once bug in pair handling is fixed in v2.0
+#  | Tests
+#  | Py3k
+#  | PEP8
+# | REPORTING
+#  | Send only best contigs per sample to QUAST for final eval step
+#  | Report on trimming, %remapped to ref vs assembled contig
+#  | Send coverage stats to file
+# | HCV-SPECIFIC
+#  | Improve genotyping rigour, use genome guidance
+# | PERFORMANCE
+#  | More pipelining to reduce disk I/O associated with mapping
 
-# time ./pipeline.py --hcv --fwd-reads-sig _F --rev-reads-sig _R --norm-k-list 25,31 --norm-c-list 5,10,15,20 --asm-k-list 33,43 --multiple-samples --in-dir /Users/Bede/Research/Analyses/phe_asm/phe_hcv_pipeline/input --out-dir /Users/Bede/Research/Analyses/phe_asm/phe_hcv_pipeline/tmp --threads 12
-
-# min_cov
-# segemehl -A -D -E values
-# min_depth
+# USAGE (single run): ./sparna.py --fwd-reads reads_F.fastq --rev-reads reads_R.fastq --fwd-reads-sig _F --rev-reads-sig _R --norm-k-list 21,31 --norm-c-list 1,5,20 --asm-k-list 21,33,55,77 --reference ref.fasta --out-dir /path/to/output --threads 12 
+# USAGE (batch): ./sparna.py --reads-dir dir/full/of/reads/ --fwd-reads-sig _1 --rev-reads-sig _2 --norm-k-list 21,31 --norm-cov-list 1,2,5,10 --asm-k-list 21,33,55,77 --reference ref.fasta --out-dir /path/to/output --threads 12 
 
 from __future__ import division, print_function
 import os
@@ -657,8 +653,8 @@ def main(
         assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, i),
                  asm_k_list, reference_guided_asm, reference, sample_name, paths, threads, i)
         best_asms[sample_name] = choose_assembly(est_ref_len, sample_name, paths, threads, i)
-        # map_reads_to_assembly(sample_name, paths, threads, i)
-        # assess_remap_coverage( best_asms[sample_name][2], paths, i)
+        map_reads_to_assembly(sample_name, paths, threads, i)
+        assess_remap_coverage( best_asms[sample_name][2], paths, i)
         evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i)        
     evaluate_all_assemblies(reference, est_ref_len, sample_name, paths, threads, i)
     report(start_time, time.time(), paths)
