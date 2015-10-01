@@ -25,6 +25,8 @@
 # | TESTS
 # | Which reference to use in QUAST... ref_found?
 # | Use Restart-from?
+# | Usage
+# | Determine best asm by mapping reads to all assemblies?
 
 # DEPENDENCIES
 # | python packages:
@@ -35,11 +37,7 @@
 # |    trimmomatic
 # | others, bundled and requiring compilation:
 
-# USAGE: ./pipeline.py --threads 12 --fwd-reads-sig _F --rev-reads-sig _R --norm-k-list 31 --norm-c-list 5 --asm-k-list 33 --multiple-samples --in-dir /path/to/fastqs --out-dir /path/to/output
 # Input fastq filenames should have an extension and a signature to allow identification of forward and reverse reads
-
-# time ./pipeline.py --hcv --fwd-reads-sig _F --rev-reads-sig _R --norm-k-list 25,31 --norm-c-list 5,10,15,20 --asm-k-list 33,43 --multiple-samples --in-dir /Users/Bede/Research/Analyses/phe_asm/phe_hcv_pipeline/input --out-dir /Users/Bede/Research/Analyses/phe_asm/phe_hcv_pipeline/tmp --threads 12
-
 # min_cov
 # min_depth
 
@@ -49,10 +47,13 @@ import sys
 import time
 import argh
 import envoy
+import logging
 import subprocess
 from Bio import SeqIO
 from Bio.Blast.Applications import NcbiblastnCommandline
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
     print('-' * 40)
@@ -74,7 +75,6 @@ def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
         fastqs = {os.path.splitext(f[0].replace(fwd_reads_sig,''))[0]: f for f in fastqs}
     print('\tDone') if fastqs else sys.exit('ERR_READS')
     return fastqs
-    
 
 def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
     print('-' * 40)
@@ -104,8 +104,7 @@ def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
     cmd_import = os.system(cmd_import)
     print('\tDone') if cmd_import == 0 else sys.exit('ERR_IMPORT')
 
-
-def hcv_count_reads(sample_name, paths, i=1):
+def count_reads(sample_name, paths, i=1):
     print('Counting reads...')
     cmd_count = ('wc -l {path_o}/merge/{i}.{sample_name}.raw.r12.fastq'
     .format(i=str(i),
@@ -130,7 +129,6 @@ def hcv_sample_reads(n_reads, paths, i=1):
     print('\tDone') if cmd_sample == 0 else sys.exit('ERR_SAMPLE')
     return n_reads_sample
 
-
 def hcv_blast_references(paths, threads, i=1):
     print('BLASTing reference sequences...')
     if not os.path.exists(paths['pipe'] + '/res/hcv_db/db.fasta.nhr'):
@@ -146,7 +144,6 @@ def hcv_blast_references(paths, threads, i=1):
         num_threads = threads)
     cmd_blastn()
     print('\tDone')
-
 
 def hcv_choose_reference(paths, i=1):
     print('Choosing reference sequence...')
@@ -168,7 +165,6 @@ def hcv_choose_reference(paths, i=1):
     print('\tDone')
     return hcv_ref_found, top_ref_accession
 
-
 def hcv_extract_reference(top_ref_accession, paths, i=1):
     print('Extracting reference ' + top_ref_accession + '...')
     reference = ''
@@ -187,7 +183,6 @@ def hcv_extract_reference(top_ref_accession, paths, i=1):
         reference_fa.write('>' + top_ref_accession + '\n' + reference)
     print('\tDone')
     return ref_path, ref_len
-
 
 def hcv_genotype(n_reads, n_reads_sample, paths, i=1):
     print('Genotyping...')
@@ -214,8 +209,7 @@ def hcv_genotype(n_reads, n_reads_sample, paths, i=1):
     print('\tDone')
     return top_genotype
 
-
-def hcv_map_reads(ref_path, paths, threads, i=1):
+def hcv_map_to_reference(ref_path, paths, threads, i=1):
     print('Aligning...')
     cmd_vars = {
     'i':str(i),
@@ -234,7 +228,6 @@ def hcv_map_reads(ref_path, paths, threads, i=1):
     for j, cmd in enumerate(cmds_map, start=1):
         cmd_map = os.system(cmd.format(**cmd_vars))
         print('\tDone (' + cmd.split(' ')[0] + ')') if cmd_map == 0 else sys.exit('ERR_MAP') # sample_name should be in here
-
 
 def hcv_assess_coverage(ref_len, paths, i=1):
     print('Identifying low coverage regions...')
@@ -277,7 +270,7 @@ def hcv_assess_coverage(ref_len, paths, i=1):
     # print('\tDone')
 
 
-def map_reads(ref, sample_name, paths, threads, i=1):
+def map_to_reference(ref, sample_name, paths, threads, i=1):
     print('Aligning... (BWA)')
     cmd_vars = {
      'i':str(i),
@@ -329,7 +322,8 @@ def trim(sample_name, paths, i=1):
              sample_name=sample_name))
     cmd_trim = envoy.run(cmd_trim)
     cmd_trim_stats = ''.join(cmd_trim.std_err).split('\n')[25]
-    print(cmd_trim.std_out, cmd_trim.std_err)
+    logger.info('{}'.format(cmd_trim.std_out))
+    logger.info('{}'.format(cmd_trim.std_err))
     cmd_trim_pp = os.system(cmd_trim_pp)
     print('\tDone') if cmd_trim.status_code == 0 and cmd_trim_pp == 0 else sys.exit('ERR_TRIM')
 
@@ -409,7 +403,8 @@ def assemble(norm_perms, asm_k_list, reference_guided_asm, reference, sample_nam
             print('\tDone') if process.returncode == 0 else sys.exit('ERR_ASM')
 
 
-def choose_assembly(est_ref_len, sample_name, paths, threads, i=1):
+def choose_assembly(target_genome_len, sample_name, paths, threads, i=1):
+    # Perhaps should map reads to multiple assemblies?
     print('Choosing best assembly...')
     longest_contigs = {}
     contigs_paths = (
@@ -420,14 +415,14 @@ def choose_assembly(est_ref_len, sample_name, paths, threads, i=1):
         asm_name = os.path.split(contigs_path)[0].split('/')[-1]
         with open(contigs_path, 'r') as contigs_file:
             longest_contig_name = None
-            longest_contig_len = None
+            longest_contig_len = 0
             for record in SeqIO.parse(contigs_file, 'fasta'):
                 if len(record.seq) > longest_contig_len:
+                    print('truee')
                     longest_contig_len = len(record.seq) 
                     longest_contig_name = record.id
         longest_contigs[asm_name] = (longest_contig_name, longest_contig_len)
-        # print(longest_contigs)
-    contig_differences = {s: abs(int(est_ref_len)-int(c[1])) for s, c in longest_contigs.items()}
+    contig_differences = {s: abs(int(target_genome_len)-int(c[1])) for s, c in longest_contigs.items()}
     best_asm = min(contig_differences, key=lambda k: contig_differences[k])
     best_asm_path = paths['o'] + '/asm/' + best_asm + '/contigs.fasta'
     best_contig = longest_contigs[best_asm]
@@ -444,7 +439,7 @@ def choose_assembly(est_ref_len, sample_name, paths, threads, i=1):
     return best_asm, best_contig[0], best_contig[1]
 
 
-def map_reads_to_assembly(sample_name, paths, threads, i=1):
+def map_to_assembly(sample_name, paths, threads, i=1):
     print('Aligning to best assembled contig... (Bowtie2)')
     cmd_vars = {
      'i':str(i),
@@ -511,7 +506,7 @@ def assess_remap_coverage(best_contig_len, paths, i=1):
     print('\tLargest uncovered region: ' + str(largest_uncovered_region) + 'bp')
 
 
-def evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i=1):
+def evaluate_assemblies(reference, target_genome_len, sample_name, paths, threads, i=1):
     print('Comparing assemblies...')
     asm_dirs = (
      [paths['o'] + '/asm/' + dir + '/contigs.fasta' for dir in
@@ -520,7 +515,7 @@ def evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i=1
     cmd_vars = {
      'i':str(i),
      'asm_dirs':' '.join(asm_dirs),
-     'ref_len':est_ref_len,
+     'ref_len':target_genome_len,
      'path_ref':paths['ref'],
      'sample_name':sample_name,
      'path_o':paths['o'],
@@ -533,7 +528,7 @@ def evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i=1
     #     cmd_eval += ' -R {path_o}/ref/{i}.{sample_name}.ref.fasta'.format(**cmd_vars)
     if reference:
         cmd_eval += ' -R {path_ref}'.format(**cmd_vars)
-    if est_ref_len:
+    if target_genome_len:
         cmd_eval += ' --est-ref-size {ref_len}'.format(**cmd_vars)
     cmd_eval += ' --min-contig 50' # Just for testing
     cmd_eval += ' &> /dev/null'
@@ -541,7 +536,7 @@ def evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i=1
     print('\tDone') if cmd_eval == 0 else sys.exit('ERR_EVAL')
 
 
-def evaluate_all_assemblies(reference, est_ref_len, sample_name, paths, threads, i=1):
+def evaluate_all_assemblies(reference, target_genome_len, sample_name, paths, threads, i=1):
     print('Comparing all assemblies...')
     asm_dirs = (
     [paths['o'] + '/asm/' + dir + '/contigs.fasta' for dir in
@@ -550,7 +545,7 @@ def evaluate_all_assemblies(reference, est_ref_len, sample_name, paths, threads,
     cmd_vars = {
      'i':str(i),
      'asm_dirs':' '.join(asm_dirs),
-     'ref_len':est_ref_len,
+     'ref_len':target_genome_len,
      'path_ref':paths['ref'],
      'sample_name':sample_name,
      'path_o':paths['o'],
@@ -561,7 +556,7 @@ def evaluate_all_assemblies(reference, est_ref_len, sample_name, paths, threads,
      '--gene-finding'.format(**cmd_vars))
     if reference:
         cmd_eval += ' -R {path_ref}'.format(**cmd_vars)
-    if est_ref_len:
+    if target_genome_len:
         cmd_eval += ' --est-ref-size {ref_len}'.format(**cmd_vars)
     cmd_eval += ' --min-contig 50' # Just for testing
     cmd_eval += ' &> /dev/null'
@@ -581,22 +576,23 @@ def main(
     fwd_reads_sig='_F', rev_reads_sig='_R',
     norm_k_list=None, norm_cov_list=None,
     asm_k_list=None, reference_guided_asm=False, 
-    reference=None, est_ref_len=None,
-    no_map=False, no_remap=False,
-    hcv=False,
-    threads=1,
-    restart_from=False):
+    reference=None, target_genome_len=10000,
+    no_premap=False, no_remap=False, bootstrap=False, bootstrap_cov_threshold=10,
+
+    hcv=False, restart_from=False,
+    threads=1):
    
     multiple_samples = True if reads_dir else False
-    if not est_ref_len and reference:
+    if not target_genome_len and reference:
         with open(reference, 'r') as reference_file:
             for record in SeqIO.parse(reference_file, 'fasta'):
-                est_ref_len = len(record.seq)
+                target_genome_len = len(record.seq)
 
     print('-' * 40)
     print('Run options...')
     print('\tMultiple input samples') if multiple_samples else print('\tSingle sample')
     print('\tPaired read signatures: \'' + fwd_reads_sig + '\', \'' + rev_reads_sig + '\'')
+    print('\tTarget genome length: ' + str(target_genome_len))
     print('\tVirus agnostic') if not hcv else print('Using HCV-specific features')
     print('\t' + str(threads) + ' threads available')
    
@@ -629,7 +625,7 @@ def main(
     for sample_name, fastq_names in fastqs.items():
         i += 1
         import_reads(multiple_samples, sample_name, fastq_names, paths, i)
-        n_reads = hcv_count_reads(sample_name, paths, i)
+        n_reads = count_reads(sample_name, paths, i)
         if hcv:    
             n_reads_sample = hcv_sample_reads(n_reads, paths, i)
             hcv_blast_references(paths, threads, i)
@@ -637,18 +633,17 @@ def main(
             if hcv_ref_found:
                 ref_path, ref_len = hcv_extract_reference(hcv_top_accession, paths, i)
                 hcv_top_genotype = hcv_genotype(n_reads, n_reads_sample, paths, i)
-                hcv_map_reads(ref_path, paths, threads, i)
+                hcv_map_to_reference(ref_path, paths, threads, i)
                 hcv_assess_coverage(ref_len, paths, i)
         elif reference:
-            map_reads(reference, sample_name, paths, threads, i)
+            map_to_reference(reference, sample_name, paths, threads, i)
         trim(sample_name, paths, i)
         assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, i),
                  asm_k_list, reference_guided_asm, reference, sample_name, paths, threads, i)
-        best_asms[sample_name] = choose_assembly(est_ref_len, sample_name, paths, threads, i)
-        # map_reads_to_assembly(sample_name, paths, threads, i)
-        # assess_remap_coverage( best_asms[sample_name][2], paths, i)
-        evaluate_assemblies(reference, est_ref_len, sample_name, paths, threads, i)        
-    evaluate_all_assemblies(reference, est_ref_len, sample_name, paths, threads, i)
+        best_asms[sample_name] = choose_assembly(target_genome_len, sample_name, paths, threads, i)
+        map_to_assembly(sample_name, paths, threads, i)
+        evaluate_assemblies(reference, target_genome_len, sample_name, paths, threads, i)        
+    evaluate_all_assemblies(reference, target_genome_len, sample_name, paths, threads, i)
     report(start_time, time.time(), paths)
 
 argh.dispatch_command(main)
