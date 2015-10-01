@@ -24,6 +24,7 @@
 # | increase khmer table size
 # | TESTS
 # | Which reference to use in QUAST... ref_found?
+# | Use Restart-from?
 
 # DEPENDENCIES
 # | python packages:
@@ -135,7 +136,7 @@ def hcv_blast_references(paths, threads, i=1):
     print('BLASTing reference sequences...')
     if not os.path.exists(paths['pipe'] + '/res/hcv_db/db.fasta.nhr'):
         cmd_blastn_index = (
-         'makeblastdb -dbtype ngcl -input_type fasta '
+         'makeblastdb -dbtype nucl -input_type fasta '
          '-in {path_pipe}/res/hcv_db/db.fasta -title db'
          .format(path_pipe=paths['pipe']))
         cmd_blastn_index = os.system(cmd_blastn_index)
