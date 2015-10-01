@@ -33,7 +33,7 @@
 # |    bwa, bowtie2, blast, samtools, vcftools, bcftools, bedtools, seqtk, spades, quast, parallel (GNU)
 # | others, bundled inside res/ directory:
 # |    trimmomatic
-# | others, bundled and requiring compilation: segemehl
+# | others, bundled and requiring compilation:
 
 # USAGE: ./pipeline.py --threads 12 --fwd-reads-sig _F --rev-reads-sig _R --norm-k-list 31 --norm-c-list 5 --asm-k-list 33 --multiple-samples --in-dir /path/to/fastqs --out-dir /path/to/output
 # Input fastq filenames should have an extension and a signature to allow identification of forward and reverse reads
@@ -41,7 +41,6 @@
 # time ./pipeline.py --hcv --fwd-reads-sig _F --rev-reads-sig _R --norm-k-list 25,31 --norm-c-list 5,10,15,20 --asm-k-list 33,43 --multiple-samples --in-dir /Users/Bede/Research/Analyses/phe_asm/phe_hcv_pipeline/input --out-dir /Users/Bede/Research/Analyses/phe_asm/phe_hcv_pipeline/tmp --threads 12
 
 # min_cov
-# segemehl -A -D -E values
 # min_depth
 
 from __future__ import division, print_function
@@ -228,8 +227,6 @@ def hcv_map_reads(ref_path, paths, threads, i=1):
     cmds_map = [
     'bwa index {ref_path} &> /dev/null',
     'bwa mem -v 0 -p -t {threads} {ref_path} {path_o}/merge/{i}.raw.r12.fastq 2> /dev/null > {path_o}/map/{i}.mapped.sam',
-    # '{path_pipe}/res/segemehl/segemehl.x -d {ref_path} -x {ref_path}.idx &> /dev/null',
-    # '{path_pipe}/res/segemehl/segemehl.x -d {ref_path} -x {ref_path}.idx -q {path_o}/merge/{i}.{sample_name}.raw.r12.fastq --threads {threads} -A 60 2> /dev/null > {path_o}/map/{i}.mapped.sam',
     'samtools view -bS {path_o}/map/{i}.mapped.sam | samtools sort - {path_o}/map/{i}.mapped',
     'samtools index {path_o}/map/{i}.mapped.bam',
     'samtools mpileup -d 1000 -f {ref_path} {path_o}/map/{i}.mapped.bam 2> /dev/null > {path_o}/map/{i}.mapped.pile',
@@ -280,28 +277,20 @@ def hcv_assess_coverage(ref_len, paths, i=1):
     # print('\tDone')
 
 
-def map_reads(use_segemehl, ref, sample_name, paths, threads, i=1):
-    print('Aligning... (Segemehl)') if use_segemehl else print('Aligning... (BWA)')
+def map_reads(ref, sample_name, paths, threads, i=1):
+    print('Aligning... (BWA)')
     cmd_vars = {
      'i':str(i),
      'sample_name':sample_name,
-     'path_segemehl':paths['segemehl'],
      'path_pipe':paths['pipe'],
      'path_o':paths['o'],
      'ref':ref,
      'threads':threads}
-    cmds_map = ['cp {ref} {path_o}/ref/ref.fasta']
-    if use_segemehl and os.system('{path_segemehl} &> /dev/null'.format(**cmd_vars)):
-        cmds_map += [
-         '{path_segemehl} -d {ref} -x {ref}.idx &> /dev/null',
-         '{path_segemehl} -d {ref} -x {ref}.idx -q {path_o}/merge/{i}.{sample_name}.raw.r12.fastq '
-         '--threads {threads} -A 60 2> /dev/null > {path_o}/map/{i}.{sample_name}.mapped.sam ']
-    else:
-        cmds_map += [
-         'bwa index {ref} &> /dev/null',
-         'bwa mem -v 0 -p -t {threads} {ref} {path_o}/merge/{i}.{sample_name}.raw.r12.fastq '
-         '2> /dev/null > {path_o}/map/{i}.{sample_name}.mapped.sam ']
     cmds_map += [
+     'cp {ref} {path_o}/ref/ref.fasta'
+     'bwa index {ref} &> /dev/null',
+     'bwa mem -v 0 -p -t {threads} {ref} {path_o}/merge/{i}.{sample_name}.raw.r12.fastq '
+     '2> /dev/null > {path_o}/map/{i}.{sample_name}.mapped.sam ',
      'samtools view -bS {path_o}/map/{i}.{sample_name}.mapped.sam | '
      'samtools sort - {path_o}/map/{i}.{sample_name}.mapped',
      'samtools index {path_o}/map/{i}.{sample_name}.mapped.bam',
@@ -593,10 +582,10 @@ def main(
     norm_k_list=None, norm_cov_list=None,
     asm_k_list=None, reference_guided_asm=False, 
     reference=None, est_ref_len=None,
-    use_segemehl=False,
     no_map=False, no_remap=False,
     hcv=False,
-    threads=1):
+    threads=1,
+    restart_from=False):
    
     multiple_samples = True if reads_dir else False
     if not est_ref_len and reference:
@@ -609,7 +598,6 @@ def main(
     print('\tMultiple input samples') if multiple_samples else print('\tSingle sample')
     print('\tPaired read signatures: \'' + fwd_reads_sig + '\', \'' + rev_reads_sig + '\'')
     print('\tVirus agnostic') if not hcv else print('Using HCV-specific features')
-    print('\tUsing Segemehl') if use_segemehl else print('\tUsing BWA')
     print('\t' + str(threads) + ' threads available')
    
     start_time = time.time()
@@ -620,8 +608,7 @@ def main(
     'in_rev':rev_reads,
     'ref':reference,
     'pipe':os.path.dirname(os.path.realpath(__file__)),
-    'o':out_dir + '/run_' + str(int(time.time())),
-    'segemehl':os.path.dirname(os.path.realpath(__file__)) + '/res/segemehl/segemehl.x'}
+    'o':out_dir + '/run_' + str(int(time.time()))}
     
     fastqs = None
     n_reads = None
@@ -653,7 +640,7 @@ def main(
                 hcv_map_reads(ref_path, paths, threads, i)
                 hcv_assess_coverage(ref_len, paths, i)
         elif reference:
-            map_reads(use_segemehl, reference, sample_name, paths, threads, i)
+            map_reads(reference, sample_name, paths, threads, i)
         trim(sample_name, paths, i)
         assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, i),
                  asm_k_list, reference_guided_asm, reference, sample_name, paths, threads, i)
