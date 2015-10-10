@@ -5,6 +5,9 @@
 # Developed in collaboration with Public Health England, Colindale
 
 # TODO
+# | Handle no reads mapped by BWA
+# | Decide on BWA vs Bowtie2
+# | remove Python2 prefix from spades.py call
 # | Top100 contigs only? --eval-n-longest-contigs 100
 # | GZIP support
 # | Fully migrate to bwa for mapping... Base reports on samtools flagsts?
@@ -17,14 +20,11 @@
 # | Consistent use of r12 / fr
 # | Fix read remapping
 # | Interleaved reads (ONE TRUE FORMAT)
-# | Python3
-# | stop using envoy, os.system()
 # | add minimum similarity threshold for reference selection
 # | report on trimming, %remapped
 # | increase khmer table size
 # | TESTS
 # | Which reference to use in QUAST... ref_found?
-# | Use Restart-from?
 # | Usage
 # | Determine best asm by mapping reads to all assemblies?
 # | Bootstrap/dogfoood assemblies with --trusted-contigs etc
@@ -46,9 +46,10 @@ import os
 import sys
 import time
 import argh
-import envoy
 import logging
 import subprocess
+import multiprocessing
+
 from Bio import SeqIO
 from Bio.Blast.Applications import NcbiblastnCommandline
 
@@ -61,6 +62,7 @@ def run(cmd):
                           universal_newlines=True,
                           stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT)
+
 
 def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
     print('-' * 40)
@@ -83,6 +85,7 @@ def list_fastqs(fwd_reads_sig, rev_reads_sig, paths):
     print('\tDone') if fastqs else sys.exit('ERR_READS')
     return fastqs
 
+
 def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
     print('-' * 40)
     print('Importing reads...')
@@ -100,7 +103,7 @@ def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
     'fastq_path_r':fastq_path + '/' + fastq_names[1],
     'path_o':paths['o'],
     'path_pipe':paths['pipe']}
-    cmd_import = (
+    cmd = (
     'cp {fastq_path_f} {path_o}/merge/{i}.{sample_name}.raw.r1.fastq && '
     'cp {fastq_path_r} {path_o}/merge/{i}.{sample_name}.raw.r2.fastq && '
     # 'interleave-reads.py {path_o}/merge/{i}.{sample_name}.raw.r1.fastq '
@@ -108,8 +111,11 @@ def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
     '{path_o}/merge/{i}.{sample_name}.raw.r2.fastq > '
     '{path_o}/merge/{i}.{sample_name}.raw.r12.fastq'
     .format(**cmd_vars))
-    cmd_import = os.system(cmd_import)
-    print('\tDone') if cmd_import == 0 else sys.exit('ERR_IMPORT')
+    logger.info(cmd)
+    cmd_run = run(cmd)
+    logger.info(cmd_run.stdout)
+    print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_IMPORT')
+
 
 def count_reads(sample_name, paths, i=1):
     print('Counting reads...')
@@ -117,10 +123,11 @@ def count_reads(sample_name, paths, i=1):
     .format(i=str(i),
             path_o=paths['o'],
             sample_name=sample_name))
-    cmd_count = envoy.run(cmd_count)
-    n_reads = int(cmd_count.std_out.strip().split(' ')[0])/4
-    print('\tDone') if cmd_count.status_code == 0 else sys.exit('ERR_COUNT')
+    cmd_run = run(cmd_count)
+    n_reads = int(cmd_run.stdout.strip().split(' ')[0])/4
+    print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_COUNT')
     return n_reads
+
 
 def map_to_reference(ref, sample_name, paths, threads, i=1):
     print('Aligning... (BWA)')
@@ -135,7 +142,7 @@ def map_to_reference(ref, sample_name, paths, threads, i=1):
      'cp {ref} {path_o}/premap/ref.fa',
      'bwa index {path_o}/premap/ref.fa',
      'bwa mem -t {threads} {path_o}/premap/ref.fa {path_o}/merge/{i}.{sample_name}.raw.r12.fastq '
-     '2> /dev/null > {path_o}/premap/{i}.{sample_name}.mapped.sam ',
+     '> {path_o}/premap/{i}.{sample_name}.mapped.sam ',
      'samtools view -bS {path_o}/premap/{i}.{sample_name}.mapped.sam '
      '| samtools sort - {path_o}/premap/{i}.{sample_name}.mapped',
      'samtools index {path_o}/premap/{i}.{sample_name}.mapped.bam',
@@ -153,6 +160,7 @@ def map_to_reference(ref, sample_name, paths, threads, i=1):
         logger.info(cmd_run.stdout)
         print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_PREMAP')
     # Return mapping stats
+
 
 def trim(sample_name, paths, i=1):
     print('Trimming...')
@@ -184,12 +192,13 @@ def trim(sample_name, paths, i=1):
         print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_TRIM')
     # Return trim stats?
 
-def normalise(norm_k_list, norm_cov_list, sample_name, paths, i=1):
+
+def normalise(norm_k_list, norm_cov_list, sample_name, paths, threads, i=1):
     print('Normalising...')
     ks = norm_k_list.split(',')
     cs = norm_cov_list.split(',')
     norm_perms = [{'k':k, 'c':c} for k in ks for c in cs]
-    cmds_norm = []
+    cmds = []
     for norm_perm in norm_perms:
         cmd_vars = {
          'i':str(i),
@@ -198,29 +207,35 @@ def normalise(norm_k_list, norm_cov_list, sample_name, paths, i=1):
          'path_pipe':paths['pipe'],
          'path_o':paths['o'],
          'sample_name':sample_name}
-        cmd_norm = (
+        cmd = (
          'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9 -p '
          '{path_o}/trim/{i}.{sample_name}.trim.r12_pe.fastq '
-         '-o {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r12_pe.fastq &> /dev/null '
+         '-o {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r12_pe.fastq '
          '&& normalize-by-median.py -C {c} -k {k} -N 1 -x 1e9 '
          '{path_o}/trim/{i}.{sample_name}.trim.se.fastq '
-         '-o {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.se.fastq &> /dev/null '
+         '-o {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.se.fastq '
          '&& split-paired-reads.py '
          '-1 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r1_pe.fastq '
          '-2 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r2_pe.fastq '
-         '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r12_pe.fastq &> /dev/null '
+         '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r12_pe.fastq '
          '&& cat {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r12_pe.fastq '
          '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.se.fastq > '
          '{path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.pe_and_se.fastq'
          .format(**cmd_vars))
-        cmds_norm.append(cmd_norm)
+        cmds.append(cmd)
         print('\tNormalising norm_k={k},norm_c={c}'.format(**cmd_vars))
-    with open(os.devnull, 'w') as devnull:
-        processes = [subprocess.Popen(cmd, shell=True, stdout=devnull) for cmd in cmds_norm]
-        for process in processes:
-            process.wait()
-            print('\tDone') if process.returncode == 0 else sys.exit('ERR_NORM')
+        logger.info('Normalising norm_k={k},norm_c={c}'.format(**cmd_vars))
+    with multiprocessing.Pool(threads) as pool:
+        results = pool.map(run, cmds)
+    logger.info([result.stdout for result in results])
+    print('\tDone')
+    # with open(os.devnull, 'w') as devnull:
+    #     processes = [subprocess.Popen(cmd, shell=True, stdout=devnull) for cmd in cmds_norm]
+    #     for process in processes:
+    #         process.wait()
+    #         print('\tDone') if process.returncode == 0 else sys.exit('ERR_NORM')
     return norm_perms
+
 
 def assemble(norm_perms, asm_k_list, reference_guided_asm, reference, sample_name, paths, threads, i=1):
     print('Assembling...')
@@ -241,7 +256,7 @@ def assemble(norm_perms, asm_k_list, reference_guided_asm, reference, sample_nam
          'sample_name':sample_name,
          'threads':threads}
         cmd_asm = (
-         'spades.py -m 8 -t {threads} -k {asm_k_list} '
+         'python2 /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
          '--pe1-1 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r1_pe.fastq '
          '--pe1-2 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r2_pe.fastq '
          '--s1 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.se.fastq '
@@ -309,7 +324,6 @@ def map_to_assembly(sample_name, paths, threads, i=1):
      '-1 {path_o}/merge/{i}.{sample_name}.raw.r1.fastq '
      '-2 {path_o}/merge/{i}.{sample_name}.raw.r2.fastq '
      '2> {path_o}/remap/{i}.{sample_name}.bt2.stats',
-     # 'echo "\t $(tail -n 1 {path_o}/remap/{i}.{sample_name}.bt2.stats)"',
      'grep -v XS:i: {path_o}/remap/{i}.sam > {path_o}/remap/{i}.uniq.sam',
      'samtools view -bS {path_o}/remap/{i}.uniq.sam | samtools sort - {path_o}/remap/{i}.uniq',
      'samtools index {path_o}/remap/{i}.uniq.bam',
@@ -318,9 +332,13 @@ def map_to_assembly(sample_name, paths, threads, i=1):
      'samtools mpileup -ud 1000 -f {path_o}/remap/{i}.contig.fasta {path_o}/remap/{i}.uniq.bam '
      '2> /dev/null | bcftools call -c | vcfutils.pl vcf2fq '
      '| seqtk seq -a - > {path_o}/remap/{i}.denovo.consensus.fasta']
-    for j, cmd in enumerate(cmds, start=1):
-        cmd_map = os.system(cmd.format(**cmd_vars))
-        print('\tDone (' + cmd.split(' ')[0] + ')') if cmd_map == 0 else sys.exit('ERR_REMAP')
+    cmds = [cmd.format(**cmd_vars) for cmd in cmds]
+    for cmd in cmds:
+        logger.info(cmd)
+        cmd_run = run(cmd)
+        logger.info(cmd_run.stdout)
+        cmd_prefix = cmd.split(' ')[0]
+        print('\tDone (' + cmd_prefix + ')') if cmd_run.returncode == 0 else sys.exit('ERR_REMAP')
     with open('{path_o}/remap/{i}.{sample_name}.bt2.stats'.format(**cmd_vars), 'r') as bt2_stats:
         bt2_count = float(bt2_stats.read().partition('% overall')[0].split('\n')[-1].strip())/100
     logger.info('Proportion of reads mapped to assembly: {}'.format(bt2_count))
@@ -330,7 +348,7 @@ def map_to_assembly(sample_name, paths, threads, i=1):
 def assess_assembly_coverage(best_contig_len, paths, i=1):
     print('Identifying low coverage regions...')
     depths = {}
-    max_coverage = None
+    max_coverage = 0
     uncovered_sites = []
     with open(paths['o'] + '/remap/' + str(i) + '.uniq.pile', 'r') as pileup:
         bases_covered = 0
@@ -378,11 +396,13 @@ def assess_assembly_coverage(best_contig_len, paths, i=1):
 
 
 def evaluate_assemblies(reference, target_genome_len, sample_name, paths, threads, i=1):
+    '''
+    Execute QUAST on all generated assemblies
+    '''
     print('Comparing assemblies...')
     asm_dirs = (
      [paths['o'] + '/asm/' + dir + '/contigs.fasta' for dir in
      filter(lambda d: d.startswith(str(i)), os.listdir(paths['o'] + '/asm'))])
-    # print(asm_dirs)
     cmd_vars = {
      'i':str(i),
      'asm_dirs':' '.join(asm_dirs),
@@ -391,48 +411,20 @@ def evaluate_assemblies(reference, target_genome_len, sample_name, paths, thread
      'sample_name':sample_name,
      'path_o':paths['o'],
      'threads':threads}
-    cmd_eval = (
-     'quast.py {asm_dirs} -o {path_o}/eval/{i}.{sample_name} '
-     '--threads {threads} '
-     '--gene-finding'.format(**cmd_vars))
-    # if reference:
-    #     cmd_eval += ' -R {path_o}/ref/{i}.{sample_name}.ref.fasta'.format(**cmd_vars)
-    if reference:
-        cmd_eval += ' -R {path_ref}'.format(**cmd_vars)
-    if target_genome_len:
-        cmd_eval += ' --est-ref-size {ref_len}'.format(**cmd_vars)
-    cmd_eval += ' --min-contig 50' # Just for testing
-    cmd_eval += ' &> /dev/null'
-    cmd_eval = os.system(cmd_eval)
-    print('\tDone') if cmd_eval == 0 else sys.exit('ERR_EVAL')
-
-
-def evaluate_all_assemblies(reference, target_genome_len, sample_name, paths, threads, i=1):
-    print('Comparing all assemblies...')
-    asm_dirs = (
-    [paths['o'] + '/asm/' + dir + '/contigs.fasta' for dir in
-    filter(lambda d: d[0].isdigit(), os.listdir(paths['o'] + '/asm'))])
-    # print(asm_dirs)
-    cmd_vars = {
-     'i':str(i),
-     'asm_dirs':' '.join(asm_dirs),
-     'ref_len':target_genome_len,
-     'path_ref':paths['ref'],
-     'sample_name':sample_name,
-     'path_o':paths['o'],
-     'threads':threads}
-    cmd_eval = (
-     'quast.py {asm_dirs} -o {path_o}/eval/ '
+    cmd = (
+     'python2 /usr/local/bin/quast.py {asm_dirs} -o {path_o}/eval/{i}.{sample_name} '
      '--threads {threads} '
      '--gene-finding'.format(**cmd_vars))
     if reference:
-        cmd_eval += ' -R {path_ref}'.format(**cmd_vars)
+        cmd += ' -R {path_o}/ref/{i}.{sample_name}.ref.fasta'.format(**cmd_vars)
+    if reference:
+        cmd += ' -R {path_ref}'.format(**cmd_vars)
     if target_genome_len:
-        cmd_eval += ' --est-ref-size {ref_len}'.format(**cmd_vars)
-    cmd_eval += ' --min-contig 50' # Just for testing
-    cmd_eval += ' &> /dev/null'
-    cmd_eval = os.system(cmd_eval)
-    print('\tDone') if cmd_eval == 0 else sys.exit('ERR_EVAL_SUMMARY')
+        cmd += ' --est-ref-size {ref_len}'.format(**cmd_vars)
+    logger.info(cmd)
+    cmd_run = run(cmd)
+    logger.info(cmd_run.stdout)
+    print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_EVAL')
 
 
 def report(start_time, end_time, paths):
@@ -492,9 +484,8 @@ def main(
         n_reads = count_reads(sample_name, paths, i)
         if reference:
             map_to_reference(reference, sample_name, paths, threads, i)
-            sys.exit()
         trim(sample_name, paths, i)
-        assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, i),
+        assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, threads, i),
                  asm_k_list, reference_guided_asm, reference, sample_name, paths, threads, i)
         best_asms[sample_name] = choose_assembly(target_genome_len, sample_name, paths, threads, i)
         logger.info('best_asms: {}'.format(best_asms[sample_name]))
@@ -503,5 +494,6 @@ def main(
         evaluate_assemblies(reference, target_genome_len, sample_name, paths, threads, i)        
     evaluate_all_assemblies(reference, target_genome_len, sample_name, paths, threads, i)
     report(start_time, time.time(), paths)
+
 
 argh.dispatch_command(main)
