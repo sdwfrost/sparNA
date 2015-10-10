@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 
-# Copyright 2015 Bede Constantinides, University of Manchester (b at bede dot im)
-# Python 3.5+ pipeline for assembly of Illumina PE RNA virus amplicons
+# SparNA: A pipeline for assembling deep-sequenced viral amplicon reads
+# Copyright 2015 Bede Constantinides, University of Manchester (b|at|bede|dot|im)
 # Developed in collaboration with Public Health England, Colindale
+# Distributed under the GNU General Public License version 3 (see LICENSE)
 
 # TODO
 # | Handle no reads mapped by BWA
@@ -33,14 +34,9 @@
 # | python packages:
 # |    argh, biopython, envoy, khmer, matplotlib
 # | others, expected inside $PATH:
-# |    bwa, bowtie2, blast, samtools, vcftools, bcftools, bedtools, seqtk, spades, quast, parallel (GNU)
+# |    bwa, bowtie2, blast, samtools, vcftools, bcftools, bedtools, seqtk, spades, quast
 # | others, bundled inside res/ directory:
 # |    trimmomatic
-# | others, bundled and requiring compilation:
-
-# Input fastq filenames should have an extension and a signature to allow identification of forward and reverse reads
-# min_cov
-# min_depth
 
 import os
 import sys
@@ -129,7 +125,7 @@ def count_reads(sample_name, paths, i=1):
     return n_reads
 
 
-def map_to_reference(ref, sample_name, paths, threads, i=1):
+def premap_to_reference(ref, sample_name, paths, threads, i=1):
     print('Aligning... (BWA)')
     cmd_vars = {
      'i':str(i),
@@ -416,8 +412,6 @@ def evaluate_assemblies(reference, target_genome_len, sample_name, paths, thread
      '--threads {threads} '
      '--gene-finding'.format(**cmd_vars))
     if reference:
-        cmd += ' -R {path_o}/ref/{i}.{sample_name}.ref.fasta'.format(**cmd_vars)
-    if reference:
         cmd += ' -R {path_ref}'.format(**cmd_vars)
     if target_genome_len:
         cmd += ' --est-ref-size {ref_len}'.format(**cmd_vars)
@@ -483,7 +477,7 @@ def main(
         import_reads(multiple_samples, sample_name, fastq_names, paths, i)
         n_reads = count_reads(sample_name, paths, i)
         if reference:
-            map_to_reference(reference, sample_name, paths, threads, i)
+            premap_to_reference(reference, sample_name, paths, threads, i)
         trim(sample_name, paths, i)
         assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, threads, i),
                  asm_k_list, reference_guided_asm, reference, sample_name, paths, threads, i)
@@ -492,7 +486,6 @@ def main(
         prop_mapped_assembly = map_to_assembly(sample_name, paths, threads, i)
         assembly_map_stats = assess_assembly_coverage(best_asms[sample_name][2], paths, i)
         evaluate_assemblies(reference, target_genome_len, sample_name, paths, threads, i)        
-    evaluate_all_assemblies(reference, target_genome_len, sample_name, paths, threads, i)
     report(start_time, time.time(), paths)
 
 
