@@ -8,7 +8,7 @@
 # TODO
 # | Handle no reads mapped by BWA
 # | Decide on BWA vs Bowtie2
-# | remove Python2 prefix from spades.py call
+# | remove Python2 prefix hack from spades.py and quast.py call
 # | Top100 contigs only? --eval-n-longest-contigs 100
 # | GZIP support
 # | Fully migrate to bwa for mapping... Base reports on samtools flagsts?
@@ -49,7 +49,7 @@ import multiprocessing
 from Bio import SeqIO
 from Bio.Blast.Applications import NcbiblastnCommandline
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 def run(cmd):
@@ -154,7 +154,8 @@ def premap_to_reference(ref, sample_name, paths, threads, i=1):
         logger.info(cmd)
         cmd_run = run(cmd)
         logger.info(cmd_run.stdout)
-        print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_PREMAP')
+        cmd_prefix = cmd.split(' ')[0]
+        print('\tDone (' + cmd_prefix + ')') if cmd_run.returncode == 0 else sys.exit('ERR_PREMAP')
     # Return mapping stats
 
 
@@ -166,7 +167,7 @@ def trim(sample_name, paths, i=1):
      'path_o':paths['o'],
      'sample_name':sample_name}
     cmds = [
-     'java -jar {path_pipe}/res/trimmomatic-0.32.jar PE '
+     'java -jar {path_pipe}/res/trimmomatic-0.33.jar PE '
      '{path_o}/merge/{i}.{sample_name}.raw.r1.fastq '
      '{path_o}/merge/{i}.{sample_name}.raw.r2.fastq '
      '{path_o}/trim/{i}.{sample_name}.trim.r1_pe.fastq '
@@ -233,9 +234,9 @@ def normalise(norm_k_list, norm_cov_list, sample_name, paths, threads, i=1):
     return norm_perms
 
 
-def assemble(norm_perms, asm_k_list, reference_guided_asm, reference, sample_name, paths, threads, i=1):
+def assemble(norm_perms, asm_k_list, untrusted_contigs, reference, sample_name, paths, threads, i=1):
     print('Assembling...')
-    if reference and reference_guided_asm:
+    if reference and untrusted_contigs:
         asm_perms = [{'k':p['k'],'c':p['c'],'rg':rg} for p in norm_perms for rg in [1, 0]]
     else:
         asm_perms = [{'k':p['k'],'c':p['c'],'rg':rg} for p in norm_perms for rg in [0]]
@@ -252,7 +253,7 @@ def assemble(norm_perms, asm_k_list, reference_guided_asm, reference, sample_nam
          'sample_name':sample_name,
          'threads':threads}
         cmd_asm = (
-         'python2 /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
+         'python2 /usr/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
          '--pe1-1 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r1_pe.fastq '
          '--pe1-2 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r2_pe.fastq '
          '--s1 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.se.fastq '
@@ -261,7 +262,7 @@ def assemble(norm_perms, asm_k_list, reference_guided_asm, reference, sample_nam
         if asm_perm['rg']:
             cmd_asm += ' --untrusted-contigs {path_ref}'.format(**cmd_vars)
         cmds_asm.append(cmd_asm)
-        print('\tAssembling norm_k={k},norm_c={c},asm_k={asm_k_list},rg={rg}'.format(**cmd_vars))
+        print('\tAssembling norm_k={k},norm_c={c},asm_k={asm_k_list},uc={rg}'.format(**cmd_vars))
     with open(os.devnull, 'w') as devnull:
         processes = [subprocess.Popen(cmd, shell=True, stdout=devnull) for cmd in cmds_asm]
         for process in processes:
@@ -284,7 +285,6 @@ def choose_assembly(target_genome_len, sample_name, paths, threads, i=1):
             longest_contig_len = 0
             for record in SeqIO.parse(contigs_file, 'fasta'):
                 if len(record.seq) > longest_contig_len:
-                    print('truee')
                     longest_contig_len = len(record.seq) 
                     longest_contig_name = record.id
         longest_contigs[asm_name] = (longest_contig_name, longest_contig_len)
@@ -432,7 +432,7 @@ def main(
     fwd_reads=None, rev_reads=None, reads_dir=None, out_dir='output',
     fwd_reads_sig='_F', rev_reads_sig='_R',
     norm_k_list=None, norm_cov_list=None,
-    asm_k_list=None, reference_guided_asm=False, 
+    asm_k_list=None, untrusted_contigs=False, 
     reference=None, target_genome_len=10000,
     premap=False, no_remap=False,
     restart_from=False,
@@ -449,7 +449,7 @@ def main(
     print('\tMultiple input samples') if multiple_samples else print('\tSingle sample')
     print('\tPaired read signatures: \'' + fwd_reads_sig + '\', \'' + rev_reads_sig + '\'')
     print('\tTarget genome length: ' + str(target_genome_len))
-    print('\t' + str(threads) + ' threads available')
+    print('\t' + str(threads) + ' threads')
    
     start_time = time.time()
     
@@ -480,7 +480,7 @@ def main(
             premap_to_reference(reference, sample_name, paths, threads, i)
         trim(sample_name, paths, i)
         assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, threads, i),
-                 asm_k_list, reference_guided_asm, reference, sample_name, paths, threads, i)
+                 asm_k_list, untrusted_contigs, reference, sample_name, paths, threads, i)
         best_asms[sample_name] = choose_assembly(target_genome_len, sample_name, paths, threads, i)
         logger.info('best_asms: {}'.format(best_asms[sample_name]))
         prop_mapped_assembly = map_to_assembly(sample_name, paths, threads, i)
