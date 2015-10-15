@@ -443,6 +443,7 @@ def main(
         with open(reference, 'r') as reference_file:
             for record in SeqIO.parse(reference_file, 'fasta'):
                 target_genome_len = len(record.seq)
+                print('woohoo')
 
     print('-' * 40)
     print('Run options...')
