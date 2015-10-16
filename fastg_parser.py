@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import networkx
-import matplotlib.pyplot
+import matplotlib
 from Bio import SeqIO
 
 # asm = networkx.Graph()
@@ -33,7 +33,7 @@ from Bio import SeqIO
 
 paths = {'o': '/Users/Bede/Research/Analyses/phe_asm/phe_hcv_pipeline/tmp/run_1443791863_phe_sample8'}
 
-def fetch_subgraph_contigs(contigs_parent_dir):
+def fetch_subgraph_contigs(contigs_parent_dir, paths, i=1):
 # def fetch_subgraph_contigs(contigs_parent_dir, paths, i=1):
     '''
     Fetch any contigs with connectivity to the longest assembly contig by parsing FASTG output.
@@ -79,11 +79,11 @@ def fetch_subgraph_contigs(contigs_parent_dir):
     subgraph_nodes_labels = dict(zip(subgraph_nodes, subgraph_node_labels))
     positions = networkx.spring_layout(subgraph)
 
-    networkx.draw(subgraph, pos=positions, node_size=subgraph_node_lens, with_labels=False)
-    networkx.draw_networkx_labels(subgraph, pos=positions, labels=subgraph_nodes_labels)
-    matplotlib.pyplot.show()
+    # networkx.draw(subgraph, pos=positions, node_size=subgraph_node_lens, with_labels=False)
+    # networkx.draw_networkx_labels(subgraph, pos=positions, labels=subgraph_nodes_labels)
+    # matplotlib.pyplot.show()
 
     return subgraph, len(subgraph_nodes)
 
 contigs_parent_dir = '/Users/Bede/Research/Analyses/phe_asm/phe_hcv_pipeline/tmp/run_1443791863_phe_sample8/asm/1.Sample8.HIV-generic.1-0..norm_k25c2.asm_k21,33,55,77.rg0/'
-fetch_subgraph_contigs(contigs_parent_dir)
+fetch_subgraph_contigs(contigs_parent_dir, paths)

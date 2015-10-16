@@ -41,9 +41,11 @@
 import os
 import sys
 import argh
-# import time
+import time
 import logging
+import networkx
 # import requests
+import matplotlib
 import subprocess
 import multiprocessing
 
@@ -239,16 +241,16 @@ def normalise(norm_k_list, norm_cov_list, sample_name, paths, threads, i=1):
 def assemble(norm_perms, asm_k_list, untrusted_contigs, reference, sample_name, paths, threads, i=1):
     print('Assembling...')
     if reference and untrusted_contigs:
-        asm_perms = [{'k':p['k'],'c':p['c'],'rg':rg} for p in norm_perms for rg in [1, 0]]
+        asm_perms = [{'k':p['k'],'c':p['c'],'uc':uc} for p in norm_perms for uc in [1, 0]]
     else:
-        asm_perms = [{'k':p['k'],'c':p['c'],'rg':rg} for p in norm_perms for rg in [0]]
+        asm_perms = [{'k':p['k'],'c':p['c'],'uc':uc} for p in norm_perms for uc in [0]]
     cmds_asm = []
     for asm_perm in asm_perms:
         cmd_vars = {
          'i':str(i),
          'k':str(asm_perm['k']),
          'c':str(asm_perm['c']),
-         'rg':str(asm_perm['rg']),
+         'uc':str(asm_perm['uc']),
          'asm_k_list':asm_k_list,
          'path_o':paths['o'],
          'path_ref':paths['ref'],
@@ -259,12 +261,12 @@ def assemble(norm_perms, asm_k_list, untrusted_contigs, reference, sample_name, 
          '--pe1-1 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r1_pe.fastq '
          '--pe1-2 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r2_pe.fastq '
          '--s1 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.se.fastq '
-         '-o {path_o}/asm/{i}.{sample_name}.norm_k{k}c{c}.asm_k{asm_k_list}.rg{rg} --careful'
+         '-o {path_o}/asm/{i}.{sample_name}.norm_k{k}c{c}.asm_k{asm_k_list}.uc{uc} --careful'
          .format(**cmd_vars))
-        if asm_perm['rg']:
+        if asm_perm['uc']:
             cmd_asm += ' --untrusted-contigs {path_ref}'.format(**cmd_vars)
         cmds_asm.append(cmd_asm)
-        print('\tAssembling norm_k={k},norm_c={c},asm_k={asm_k_list},uc={rg}'.format(**cmd_vars))
+        print('\tAssembling norm_k={k},norm_c={c},asm_k={asm_k_list},uc={uc}'.format(**cmd_vars))
     with open(os.devnull, 'w') as devnull:
         processes = [subprocess.Popen(cmd, shell=True, stdout=devnull) for cmd in cmds_asm]
         for process in processes:
@@ -272,8 +274,65 @@ def assemble(norm_perms, asm_k_list, untrusted_contigs, reference, sample_name, 
             print('\tDone') if process.returncode == 0 else sys.exit('ERR_ASM')
 
 
+def fetch_subgraph(asm_dir, subgraph_dir):
+    '''
+    Fetch any contigs with connectivity to the longest assembly contig by parsing FASTG output.
+    Assumes that the longest contig is the first contig, which it is for SPAdes.
+    Canonicalise forward and reverse complement nodes
+    Handle cases where longest contig is unconnected
+    Returns subgraph of contigs and its number of nodes
+    '''
+    os.makedirs(subgraph_dir)
+    graph = networkx.Graph()
+    longest_contig = None
+    print()
+    with open(asm_dir + '/assembly_graph.fastg', 'r') as contigs_fastg_file:
+        for record in SeqIO.parse(contigs_fastg_file, 'fasta'): # treat fastg as fasta
+            node_name, node_neighbors = None, None
+            canonicalised_header = record.id[:-1].replace("'","")
+            if ':' in canonicalised_header: # is node connected?
+                node_name, node_neighbors = canonicalised_header.split(':')
+                if longest_contig is None:
+                   longest_contig = node_name
+                node_neighbors = node_neighbors.split(',')
+                for node_neighbor in node_neighbors:
+                    if (node_name, node_neighbor) not in graph.edges():
+                        graph.add_edge(node_name, node_neighbor)
+            else:
+                node_name = canonicalised_header
+            if longest_contig is None:
+                longest_contig = node_name
+                graph.add_node(node_name)
+
+    subgraph = graph.subgraph(networkx.node_connected_component(graph, longest_contig))
+    subgraph_nodes = subgraph.nodes()
+    subgraph_node_lens = [int(node.split('length_')[1].split('_cov')[0]) for node in subgraph_nodes]
+    subgraph_nodes_lens = dict(zip(subgraph_nodes, subgraph_node_lens))
+
+    with open(asm_dir + '/contigs.fasta', 'r') as contigs_file:
+        with open(subgraph_dir + '/contigs.fasta', 'w') as subgraph_contigs_file:
+            for record in SeqIO.parse(contigs_file, 'fasta'):
+                if record.id in subgraph_nodes:
+                    SeqIO.write(record, subgraph_contigs_file, 'fasta')
+
+    subgraph_node_labels = [str(item) for item in subgraph_node_lens]
+    subgraph_nodes_labels = dict(zip(subgraph_nodes, subgraph_node_labels))
+
+    # positions = networkx.spring_layout(subgraph)
+    # networkx.draw(subgraph, pos=positions, node_size=subgraph_node_lens, with_labels=False)
+    # networkx.draw_networkx_labels(subgraph, pos=positions, labels=subgraph_nodes_labels)
+    # matplotlib.pyplot.show()
+    return subgraph, subgraph_nodes_lens
+
+def fetch_subgraphs(paths, i=1):
+    print('Fetching assembly subgraphs...')
+    asm_names = [d for d in os.listdir(paths['o'] + '/asm') if d.split('.', 1)[0] == str(i)]
+    asm_dirs = [paths['o'] + '/asm/' + dir for dir in asm_names]
+    subgraph_dirs = [paths['o'] + '/subgraph/' + dir for dir in asm_names]
+    for asm_dir, subgraph_dir in zip(asm_dirs, subgraph_dirs):
+        print(fetch_subgraph(asm_dir, subgraph_dir))
+
 def choose_assembly(target_genome_len, sample_name, paths, threads, i=1):
-    # Perhaps should map reads to multiple assemblies?
     print('Choosing best assembly...')
     longest_contigs = {}
     contigs_paths = (
@@ -471,7 +530,7 @@ def main(
     n_reads = None
     n_reads_sample = None
 
-    job_dirs = ['merge', 'sample', 'blast', 'ref', 'premap', 'trim', 'norm', 'asm', 'remap', 'eval']
+    job_dirs = ['merge', 'ref', 'premap', 'trim', 'norm', 'asm', 'subgraph', 'remap', 'eval']
     for dir in job_dirs:
         os.makedirs(paths['o'] + '/' + dir)
 
@@ -487,6 +546,7 @@ def main(
         trim(sample_name, paths, i)
         assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, threads, i),
                  asm_k_list, untrusted_contigs, reference, sample_name, paths, threads, i)
+        fetch_subgraphs(paths, i)
         best_asms[sample_name] = choose_assembly(target_genome_len, sample_name, paths, threads, i)
         logger.info('best_asms: {}'.format(best_asms[sample_name]))
         prop_mapped_assembly = map_to_assembly(sample_name, paths, threads, i)

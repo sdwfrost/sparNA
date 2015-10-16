@@ -25,7 +25,7 @@ def build_ebi_blast_query(title, sequence):
              'filter': 'T',
              'dropoff': 0,
              'scores': 5,
-             'alignments': 5,
+             'alignments': 10,
              'title': title,
              'sequence': str(sequence) }
 
@@ -75,7 +75,7 @@ def ebi_blast(query):
     logger.info(results)
     return results
 
-def ebi_parallel_blast(fasta):
+def parallel_ebi_blast(fasta):
     '''
     Returns BLAST results as an OrderedDict of lists of tuples
     [{'seq_1': [(hit_1), (hit_2)]}, {'seq_2': [(hit_1), (hit_2)]}]
@@ -93,12 +93,10 @@ def ebi_parallel_blast(fasta):
 
     return results
 
-def ebi_blast_top_hits(results):
-    return [{query: hits[1][1]} for query, hits in result.items() for result in results]
 
-results = ebi_parallel_blast(sys.argv[1]))
-top_hits = [{query: hits[1]} for query, hits in result.items() for result in results]
-top_hit_names = [{query: hits[1][1]} for query, hits in result.items() for result in results]
+results = ebi_parallel_blast(sys.argv[1])
+top_hits = [{query: hits[1] for query, hits in result.items()} for result in results]
+top_hit_names = [{query: hits[1][1] for query, hits in result.items()} for result in results]
 
-print(top_hit_names)
+print(results)
 
