@@ -34,23 +34,26 @@
 # | python packages:
 # |    argh, biopython, envoy, khmer, matplotlib
 # | others, expected inside $PATH:
-# |    bwa, bowtie2, blast, samtools, vcftools, bcftools, bedtools, seqtk, spades, quast
+# |    bwa, bowtie2, samtools, vcftools, bcftools, bedtools, seqtk, spades, quast
 # | others, bundled inside res/ directory:
 # |    trimmomatic
 
 import os
 import sys
-import time
 import argh
+# import time
 import logging
+# import requests
 import subprocess
 import multiprocessing
 
 from Bio import SeqIO
-from Bio.Blast.Applications import NcbiblastnCommandline
+from collections import OrderedDict
+
 
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
+
 
 def run(cmd):
     return subprocess.run(cmd,
@@ -102,7 +105,6 @@ def import_reads(multiple_samples, sample_name, fastq_names, paths, i=1):
     cmd = (
     'cp {fastq_path_f} {path_o}/merge/{i}.{sample_name}.raw.r1.fastq && '
     'cp {fastq_path_r} {path_o}/merge/{i}.{sample_name}.raw.r2.fastq && '
-    # 'interleave-reads.py {path_o}/merge/{i}.{sample_name}.raw.r1.fastq '
     '{path_pipe}/res/interleave.py {path_o}/merge/{i}.{sample_name}.raw.r1.fastq '
     '{path_o}/merge/{i}.{sample_name}.raw.r2.fastq > '
     '{path_o}/merge/{i}.{sample_name}.raw.r12.fastq'
@@ -306,6 +308,9 @@ def choose_assembly(target_genome_len, sample_name, paths, threads, i=1):
 
 
 def map_to_assembly(sample_name, paths, threads, i=1):
+    '''
+    Map assembly with bowtie2 
+    '''
     print('Aligning to best assembled contig... (Bowtie2)')
     cmd_vars = {
      'i':str(i),

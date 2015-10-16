@@ -33,7 +33,8 @@ from Bio import SeqIO
 
 paths = {'o': '/Users/Bede/Research/Analyses/phe_asm/phe_hcv_pipeline/tmp/run_1443791863_phe_sample8'}
 
-def fetch_subgraph_contigs(contigs_parent_dir, paths, i=1):
+def fetch_subgraph_contigs(contigs_parent_dir):
+# def fetch_subgraph_contigs(contigs_parent_dir, paths, i=1):
     '''
     Fetch any contigs with connectivity to the longest assembly contig by parsing FASTG output.
     Assumes that the longest contig is the first contig, which it is for SPAdes.
@@ -78,9 +79,9 @@ def fetch_subgraph_contigs(contigs_parent_dir, paths, i=1):
     subgraph_nodes_labels = dict(zip(subgraph_nodes, subgraph_node_labels))
     positions = networkx.spring_layout(subgraph)
 
-    # networkx.draw(subgraph, pos=positions, node_size=subgraph_node_lens, with_labels=False)
-    # networkx.draw_networkx_labels(subgraph, pos=positions, labels=subgraph_nodes_labels)
-    # matplotlib.pyplot.show()
+    networkx.draw(subgraph, pos=positions, node_size=subgraph_node_lens, with_labels=False)
+    networkx.draw_networkx_labels(subgraph, pos=positions, labels=subgraph_nodes_labels)
+    matplotlib.pyplot.show()
 
     return subgraph, len(subgraph_nodes)
 
