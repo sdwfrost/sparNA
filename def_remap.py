@@ -26,7 +26,7 @@ def map_to_subgraphs(paths, threads, i=1):
              'bwa mem -t {threads} {path_o}/subgraph/{dir}/contigs.fasta '
              '{path_o}/merge/{i}.{sample_name}.raw.r12.fastq '
              '> {path_o}/subgraph/{dir}/contigs.mapped.sam ',
-             # count reads mapped and uniquely mapped reads ith flagstat
+             # count reads mapped and uniquely mapped reads ith flagstats
             cmds = [cmd.format(**cmd_vars) for cmd in cmds]
             for cmd in cmds:
                 logger.info(cmd)
