@@ -44,7 +44,6 @@ import argh
 import time
 import logging
 import networkx
-# import requests
 import matplotlib
 import subprocess
 import multiprocessing
@@ -257,7 +256,7 @@ def assemble(norm_perms, asm_k_list, untrusted_contigs, reference, sample_name, 
          'sample_name':sample_name,
          'threads':threads}
         cmd_asm = (
-         'python2 /usr/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
+         'python2 /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
          '--pe1-1 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r1_pe.fastq '
          '--pe1-2 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.r2_pe.fastq '
          '--s1 {path_o}/norm/{i}.{sample_name}.norm_k{k}c{c}.se.fastq '
@@ -276,8 +275,8 @@ def assemble(norm_perms, asm_k_list, untrusted_contigs, reference, sample_name, 
 
 def fetch_subgraph(asm_dir, subgraph_dir):
     '''
-    Fetch any contigs with connectivity to the longest assembly contig by parsing FASTG output.
-    Assumes that the longest contig is the first contig, which it is for SPAdes.
+    Fetch contigs with connectivity to the longest assembly contig by parsing SPAdes FASTG output.
+    Assumes that the longest contig is the first contig (which it is for SPAdes prior to v3.6.1).
     Canonicalise forward and reverse complement nodes
     Handle cases where longest contig is unconnected
     Returns subgraph of contigs and its number of nodes
@@ -286,7 +285,7 @@ def fetch_subgraph(asm_dir, subgraph_dir):
     graph = networkx.Graph()
     longest_contig = None
     print()
-    with open(asm_dir + '/assembly_graph.fastg', 'r') as contigs_fastg_file:
+    with open(asm_dir + '/contigs.fastg', 'r') as contigs_fastg_file:
         for record in SeqIO.parse(contigs_fastg_file, 'fasta'): # treat fastg as fasta
             node_name, node_neighbors = None, None
             canonicalised_header = record.id[:-1].replace("'","")
@@ -311,6 +310,7 @@ def fetch_subgraph(asm_dir, subgraph_dir):
 
     with open(asm_dir + '/contigs.fasta', 'r') as contigs_file:
         with open(subgraph_dir + '/contigs.fasta', 'w') as subgraph_contigs_file:
+            print(subgraph_nodes)
             for record in SeqIO.parse(contigs_file, 'fasta'):
                 if record.id in subgraph_nodes:
                     SeqIO.write(record, subgraph_contigs_file, 'fasta')
@@ -330,7 +330,8 @@ def fetch_subgraphs(paths, i=1):
     asm_dirs = [paths['o'] + '/asm/' + dir for dir in asm_names]
     subgraph_dirs = [paths['o'] + '/subgraph/' + dir for dir in asm_names]
     for asm_dir, subgraph_dir in zip(asm_dirs, subgraph_dirs):
-        print(fetch_subgraph(asm_dir, subgraph_dir))
+        subgraph, subgraph_nodes = fetch_subgraph(asm_dir, subgraph_dir))
+        print(subgraph_nodes)
 
 def choose_assembly(target_genome_len, sample_name, paths, threads, i=1):
     print('Choosing best assembly...')
@@ -368,7 +369,7 @@ def choose_assembly(target_genome_len, sample_name, paths, threads, i=1):
 
 def map_to_assembly(sample_name, paths, threads, i=1):
     '''
-    Map assembly with bowtie2 
+    Map assembly with Bowtie2 
     '''
     print('Aligning to best assembled contig... (Bowtie2)')
     cmd_vars = {
@@ -499,7 +500,7 @@ def main(
     asm_k_list=None, untrusted_contigs=False, 
     reference=None, target_genome_len=10000,
     premap=False, no_remap=False,
-    restart_from=False,
+    restart_from=False, min_contig_len=500,
     threads=1):
    
     multiple_samples = True if reads_dir else False
