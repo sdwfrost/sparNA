@@ -39,13 +39,16 @@
 # |    trimmomatic
 
 import os
+import io
 import sys
 import argh
 import time
 import logging
+import requests
 import networkx
 import matplotlib
 import subprocess
+import collections
 import multiprocessing
 
 from Bio import SeqIO
@@ -273,6 +276,147 @@ def assemble(norm_perms, asm_k_list, untrusted_contigs, reference, sample_name, 
             print('\tDone') if process.returncode == 0 else sys.exit('ERR_ASM')
 
 
+def build_ebi_blast_query(title, sequence):
+    '''
+    Returns dict of REST params for the EBI BLAST API
+    '''
+    logger.info('building query')
+    return { 'email': 'bede.constantinides@manchester.ac.uk',
+             'program': 'blastn',
+             'stype': 'dna',
+             'database': 'em_rel_vrl',
+             'align': 6,
+             'match_scores': '1,-3',
+             'gapopen': 5, 
+             'gapextend': 2,
+             'exp': '1e-10',
+             'filter': 'T',
+             'dropoff': 0,
+             'scores': 5,
+             'alignments': 5,
+             'title': title,
+             'sequence': str(sequence) }
+
+def parse_hits(title, raw_hits):
+    '''
+    Returns list of tuples of BLAST hits
+    [(blast, tab, output, fields), (blast, tab, output, fields)]
+    '''
+    hits = []
+    for line in io.StringIO(raw_hits):
+        if ':' in line:
+            fields = [field.strip() for field in line.split('\t')]
+            hit = (title, ) + tuple(fields[1].split(':')) + tuple(fields[2:])
+            hits.append(hit)
+    return hits
+
+def fetch_annotation(database, accession):
+    '''
+    Return SeqRecord of annotation for given EMBL accession number
+    '''
+    query = 'http://www.ebi.ac.uk/Tools/dbfetch/dbfetch/{}/{}'.format(database, accession)
+    request = requests.get(query)
+    annotation = SeqIO.read(io.StringIO(request.text), 'embl')
+    return annotation
+
+def ebi_blast(query):
+    '''
+    Returns BLAST hits as a tuple containing a list of tuples for each hit
+    ('seq', [(blast, tab, output, fields),
+             (blast, tab, output, fields)])
+    '''
+    run_url = 'http://www.ebi.ac.uk/Tools/services/rest/ncbiblast/run/'
+    status_url = 'http://www.ebi.ac.uk/Tools/services/rest/ncbiblast/status/'
+    results_url = 'http://www.ebi.ac.uk/Tools/services/rest/ncbiblast/result/'
+
+    call = requests.post(run_url, data=query)
+    start_time = time.time()
+    logger.info('dispatched blast jobid: ' + call.text)
+    while True:
+        status = requests.get(status_url + call.text)
+        if status.text == 'FINISHED':
+            hits_r = requests.get(results_url + call.text + '/out')
+            hits = parse_hits(query['title'], hits_r.text)
+            logger.info(status.text + ' ' + call.text)
+            logger.info('Job completed in ' + str(time.time() - start_time))
+            break
+        elif time.time() - start_time > 120:
+            print('blast timeout')
+            logger.error('blast timeout')
+            break
+        elif status.text == 'RUNNING':
+            time.sleep(2)
+        else:
+            print('status: ' + status.text)
+            logger.error('status: ' + status.text)
+            break
+    return (query['title'], hits)
+
+def ebi_annotated_blast(query):
+    '''
+    Returns BLAST hits as a tuple containing a list of tuples of hit tuples and SeqRecord annotations
+    ('seq', [((blast, tab, output, fields), SeqRecord),
+             ((blast, tab, output, fields), SeqRecord)])
+    '''
+    run_url = 'http://www.ebi.ac.uk/Tools/services/rest/ncbiblast/run/'
+    status_url = 'http://www.ebi.ac.uk/Tools/services/rest/ncbiblast/status/'
+    results_url = 'http://www.ebi.ac.uk/Tools/services/rest/ncbiblast/result/'
+
+    call = requests.post(run_url, data=query)
+    start_time = time.time()
+    logger.info('dispatched blast jobid: ' + call.text)
+    while True:
+        status = requests.get(status_url + call.text)
+        if status.text == 'FINISHED':
+            hits_r = requests.get(results_url + call.text + '/out')
+            hits = parse_hits(query['title'], hits_r.text)
+            annotations_items = [hit[1] + hit[2] for hit in hits] # all there
+            annotations = list(fetch_annotation(hit[1], hit[2]) for hit in hits)
+            hits_annotations = list(zip(hits, annotations))
+            logger.info(status.text + ' ' + call.text)
+            print(time.time() - start_time)
+            break
+        elif time.time() - start_time > 120:
+            print('blast timeout')
+            logger.error('blast timeout')
+            break
+        elif status.text == 'RUNNING':
+            time.sleep(2)
+        else:
+            print('status: ' + status.text)
+            logger.error('status: ' + status.text)
+            break
+    return (query['title'], hits_annotations)
+
+def fasta_blaster(fasta, seq_limit=0):
+    '''
+    CONTAINS TESTING CODE
+    Returns BLAST results as an OrderedDict of ebi_blast() or ebi_annotated_blast() output
+    ebi_blast():
+    OrderedDict([('seq_1', [(blast, tab, output, fields),
+                            (blast, tab, output, fields)],
+                 ('seq_2', [(blast, tab, output, fields),
+                            (blast, tab, output, fields)])])
+    ebi_annotated_blast():
+    OrderedDict([('seq_1', [((blast, tab, output, fields), SeqRecord),
+                            ((blast, tab, output, fields), SeqRecord)],
+                 ('seq_2', [((blast, tab, output, fields), SeqRecord),
+                            ((blast, tab, output, fields), SeqRecord)])])
+    '''
+    records = collections.OrderedDict()
+    with open(fasta, 'r') as fasta_file:
+        for record in SeqIO.parse(fasta_file, 'fasta'):
+            records[record.id] = record.seq
+    # JUST FOR TESTING
+    queries = [build_ebi_blast_query(title, seq) for title, seq in records.items()][0:6]
+    
+    with multiprocessing.Pool(30) as pool:
+        results_tuple = pool.map(ebi_annotated_blast, queries)
+    
+    results = collections.OrderedDict(results_tuple)
+    return results
+
+
 def fetch_subgraph(asm_dir, subgraph_dir):
     '''
     Fetch contigs with connectivity to the longest assembly contig by parsing SPAdes FASTG output.
@@ -330,8 +474,9 @@ def fetch_subgraphs(paths, i=1):
     asm_dirs = [paths['o'] + '/asm/' + dir for dir in asm_names]
     subgraph_dirs = [paths['o'] + '/subgraph/' + dir for dir in asm_names]
     for asm_dir, subgraph_dir in zip(asm_dirs, subgraph_dirs):
-        subgraph, subgraph_nodes = fetch_subgraph(asm_dir, subgraph_dir))
+        subgraph, subgraph_nodes = fetch_subgraph(asm_dir, subgraph_dir)
         print(subgraph_nodes)
+
 
 def choose_assembly(target_genome_len, sample_name, paths, threads, i=1):
     print('Choosing best assembly...')
@@ -367,7 +512,7 @@ def choose_assembly(target_genome_len, sample_name, paths, threads, i=1):
     return best_asm, best_contig[0], best_contig[1]
 
 
-def map_to_assembly(sample_name, paths, threads, i=1):
+def map_to_longest_contig(sample_name, paths, threads, i=1):
     '''
     Map assembly with Bowtie2 
     '''
@@ -404,7 +549,6 @@ def map_to_assembly(sample_name, paths, threads, i=1):
         bt2_count = float(bt2_stats.read().partition('% overall')[0].split('\n')[-1].strip())/100
     logger.info('Proportion of reads mapped to assembly: {}'.format(bt2_count))
     return bt2_count
-
 
 def assess_assembly_coverage(best_contig_len, paths, i=1):
     print('Identifying low coverage regions...')
@@ -455,6 +599,45 @@ def assess_assembly_coverage(best_contig_len, paths, i=1):
     }
     return map_stats
 
+def map_to_assemblies(sample_name, paths, threads, i):
+    '''
+    Map original reads to each assembly with Bowtie2 
+    '''
+    print('Aligning to assemblies... (Bowtie2)')
+    asm_names = filter(lambda d: d.startswith(str(i)), os.listdir(paths['o'] + '/asm'))
+    asm_names_paths = {a:paths['o'] + '/asm/' + a + '/contigs.fasta' for a in asm_names}
+    remap_stats = {}
+    for asm_name, asm_path in asm_names_paths.items():
+        cmd_vars = {
+         'i':str(i),
+         'sample_name':sample_name,
+         'path_pipe':paths['pipe'],
+         'path_o':paths['o'],
+         'threads':threads,
+         'asm_name':asm_name,
+         'path_asm':asm_path}
+        cmds = [
+         'bowtie2-build -q {path_asm} {path_o}/remap/{asm_name}',
+         'bowtie2 -x {path_o}/remap/{asm_name} -S {path_o}/remap/{asm_name}.sam --no-unal' 
+         ' --very-sensitive-local --threads {threads}'
+         ' -1 {path_o}/merge/{i}.{sample_name}.raw.r1.fastq'
+         ' -2 {path_o}/merge/{i}.{sample_name}.raw.r2.fastq'
+         ' 2> {path_o}/remap/{asm_name}.bt2.stats']
+        cmds = [cmd.format(**cmd_vars) for cmd in cmds]
+        for cmd in cmds:
+            logger.info(cmd)
+            cmd_run = run(cmd)
+            logger.info(cmd_run.stdout)
+            cmd_prefix = cmd.split(' ')[0]
+            print('\tDone (' +cmd_prefix+ ')') if cmd_run.returncode == 0 else sys.exit('ERR_REMAP')
+        with open('{path_o}/remap/{asm_name}.bt2.stats'.format(**cmd_vars), 'r') as bt2_stats:
+            bt2_count = float(bt2_stats.read().partition('% overall')[0].split('\n')[-1].strip())/100
+        with open(asm_path, 'r') as asm_file:
+            for record in SeqIO.parse(asm_file, 'fasta'):
+                longest_contig_len = len(record.seq)
+                break
+        remap_stats[asm_name] = (bt2_count, longest_contig_len)
+    print(remap_stats)
 
 def evaluate_assemblies(reference, target_genome_len, sample_name, paths, threads, i=1):
     '''
@@ -547,10 +730,12 @@ def main(
         trim(sample_name, paths, i)
         assemble(normalise(norm_k_list, norm_cov_list, sample_name, paths, threads, i),
                  asm_k_list, untrusted_contigs, reference, sample_name, paths, threads, i)
-        fetch_subgraphs(paths, i)
+        # fetch_subgraphs(paths, i)
         best_asms[sample_name] = choose_assembly(target_genome_len, sample_name, paths, threads, i)
+        # blast_results = fasta_blaster(paths['o'] + '/asm/' +  best_asms[sample_name][0] + '/contigs.fasta')
         logger.info('best_asms: {}'.format(best_asms[sample_name]))
-        prop_mapped_assembly = map_to_assembly(sample_name, paths, threads, i)
+        map_to_assemblies(sample_name, paths, threads, i)
+        prop_mapped_assembly = map_to_longest_contig(sample_name, paths, threads, i)
         assembly_map_stats = assess_assembly_coverage(best_asms[sample_name][2], paths, i)
         evaluate_assemblies(reference, target_genome_len, sample_name, paths, threads, i)        
     report(start_time, time.time(), paths)
