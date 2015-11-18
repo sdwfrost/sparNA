@@ -423,40 +423,6 @@ def fasta_blaster(fasta, seq_limit=0):
     return results
 
 
-def choose_assembly(target_genome_len, sample_name, paths, threads, i=1):
-    print('Choosing best assembly...')
-    longest_contigs = {}
-    contigs_paths = (
-    [paths['o'] + '/asm/' +  dir + '/contigs.fasta' for dir in
-    filter(lambda d: d.startswith(str(i)), os.listdir(paths['o'] + '/asm'))])
-    longest_contigs = {}
-    for contigs_path in contigs_paths:
-        asm_name = os.path.split(contigs_path)[0].split('/')[-1]
-        with open(contigs_path, 'r') as contigs_file:
-            longest_contig_name = None
-            longest_contig_len = 0
-            for record in SeqIO.parse(contigs_file, 'fasta'):
-                if len(record.seq) > longest_contig_len:
-                    longest_contig_len = len(record.seq) 
-                    longest_contig_name = record.id
-        longest_contigs[asm_name] = (longest_contig_name, longest_contig_len)
-    contig_differences = {s: abs(int(target_genome_len)-int(c[1])) for s, c in longest_contigs.items()}
-    best_asm = min(contig_differences, key=lambda k: contig_differences[k])
-    best_asm_path = paths['o'] + '/asm/' + best_asm + '/contigs.fasta'
-    best_contig = longest_contigs[best_asm]
-    
-    with open(best_asm_path, 'r') as best_asm_file:
-        for record in SeqIO.parse(best_asm_file, 'fasta'):
-            if record.id == best_contig[0]:
-                with open(paths['o'] + '/remap/' + str(i) + '.contig.fasta', 'w') as asm_ref_file:
-                    SeqIO.write(record, asm_ref_file, 'fasta')
-
-    print('\tPutative best assembly: ' + best_asm)
-    print('\tPutative best contig name: ' + str(best_contig[0]))
-    print('\tPutative best contig length: ' + str(best_contig[1]))
-    return best_asm, best_contig[0], best_contig[1]
-
-
 def map_to_longest_contig(sample_name, paths, threads, i=1):
     '''
     Map assembly with Bowtie2 
@@ -598,7 +564,6 @@ def map_to_assemblies(sample_name, paths, threads, i):
         remap_stats[asm_name] = contig_stats
     print(remap_stats)
     return remap_stats
-
 
 
 def evaluate_assemblies(reference, target_genome_len, sample_name, paths, threads, i=1):
