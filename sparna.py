@@ -43,6 +43,7 @@ import io
 import sys
 import argh
 import time
+import pandas
 import logging
 import requests
 import networkx
@@ -51,7 +52,12 @@ import subprocess
 import collections
 import multiprocessing
 
+# import plotly.plotly as py
+# import plotly.graph_objs as go
+
 from Bio import SeqIO
+
+
 from collections import OrderedDict
 
 
@@ -599,9 +605,13 @@ def assess_assembly_coverage(best_contig_len, paths, i=1):
     }
     return map_stats
 
+
 def map_to_assemblies(sample_name, paths, threads, i):
     '''
-    Map original reads to each assembly with Bowtie2 
+    Map original reads to each assembly with Bowtie2
+    Record mapping statistics
+    Screen uniquely mapped reads and quantify reads mapped per contig
+    Returns dict of tuples containing contig_len and n_reads_mapped for each contig
     '''
     print('Aligning to assemblies... (Bowtie2)')
     asm_names = filter(lambda d: d.startswith(str(i)), os.listdir(paths['o'] + '/asm'))
@@ -618,11 +628,17 @@ def map_to_assemblies(sample_name, paths, threads, i):
          'path_asm':asm_path}
         cmds = [
          'bowtie2-build -q {path_asm} {path_o}/remap/{asm_name}',
-         'bowtie2 -x {path_o}/remap/{asm_name} -S {path_o}/remap/{asm_name}.sam --no-unal' 
-         ' --very-sensitive-local --threads {threads}'
+         'bowtie2 -x {path_o}/remap/{asm_name} --no-unal --very-sensitive-local --threads {threads}'
          ' -1 {path_o}/merge/{i}.{sample_name}.raw.r1.fastq'
          ' -2 {path_o}/merge/{i}.{sample_name}.raw.r2.fastq'
-         ' 2> {path_o}/remap/{asm_name}.bt2.stats']
+         ' -S {path_o}/remap/{asm_name}.sam'
+         ' 2> {path_o}/remap/{asm_name}.bt2.stats',
+         'grep -v XS:i: {path_o}/remap/{asm_name}.sam > {path_o}/remap/{asm_name}.uniq.sam',
+         'samtools view -bS {path_o}/remap/{asm_name}.uniq.sam'
+         ' | samtools sort - {path_o}/remap/{asm_name}.uniq',
+         'samtools index {path_o}/remap/{asm_name}.uniq.bam',
+         'samtools idxstats {path_o}/remap/{asm_name}.uniq.bam'
+         ' > {path_o}/remap/{asm_name}.uniq.bam.stats']
         cmds = [cmd.format(**cmd_vars) for cmd in cmds]
         for cmd in cmds:
             logger.info(cmd)
@@ -630,14 +646,21 @@ def map_to_assemblies(sample_name, paths, threads, i):
             logger.info(cmd_run.stdout)
             cmd_prefix = cmd.split(' ')[0]
             print('\tDone (' +cmd_prefix+ ')') if cmd_run.returncode == 0 else sys.exit('ERR_REMAP')
+        
         with open('{path_o}/remap/{asm_name}.bt2.stats'.format(**cmd_vars), 'r') as bt2_stats:
-            bt2_count = float(bt2_stats.read().partition('% overall')[0].split('\n')[-1].strip())/100
-        with open(asm_path, 'r') as asm_file:
-            for record in SeqIO.parse(asm_file, 'fasta'):
-                longest_contig_len = len(record.seq)
-                break
-        remap_stats[asm_name] = (bt2_count, longest_contig_len)
+            map_prop = float(bt2_stats.read().partition('% overall')[0].split('\n')[-1].strip())/100
+        
+        contig_stats = []
+        with open('{path_o}/remap/{asm_name}.uniq.bam.stats'.format(**cmd_vars), 'r') as bam_stats:
+            for line in bam_stats:
+                contig_name, contig_len, reads_mapped = line.strip().split('\t')[0:3]
+                contig_stats.append((contig_name, int(contig_len), int(reads_mapped)))
+        
+        remap_stats[asm_name] = contig_stats
     print(remap_stats)
+    return remap_stats
+
+
 
 def evaluate_assemblies(reference, target_genome_len, sample_name, paths, threads, i=1):
     '''
@@ -734,10 +757,10 @@ def main(
         best_asms[sample_name] = choose_assembly(target_genome_len, sample_name, paths, threads, i)
         # blast_results = fasta_blaster(paths['o'] + '/asm/' +  best_asms[sample_name][0] + '/contigs.fasta')
         logger.info('best_asms: {}'.format(best_asms[sample_name]))
-        map_to_assemblies(sample_name, paths, threads, i)
-        prop_mapped_assembly = map_to_longest_contig(sample_name, paths, threads, i)
-        assembly_map_stats = assess_assembly_coverage(best_asms[sample_name][2], paths, i)
-        evaluate_assemblies(reference, target_genome_len, sample_name, paths, threads, i)        
+        remap_stats = map_to_assemblies(sample_name, paths, threads, i)
+        # prop_mapped_assembly = map_to_longest_contig(sample_name, paths, threads, i)
+        # assembly_map_stats = assess_assembly_coverage(best_asms[sample_name][2], paths, i)
+        # evaluate_assemblies(reference, target_genome_len, sample_name, paths, threads, i)        
     report(start_time, time.time(), paths)
 
 
