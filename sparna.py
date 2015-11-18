@@ -478,36 +478,6 @@ def map_to_assemblies(sample_name, paths, threads, i):
     return remap_stats
 
 
-def evaluate_assemblies(reference, target_genome_len, sample_name, paths, threads, i=1):
-    '''
-    Execute QUAST on all generated assemblies
-    '''
-    print('Comparing assemblies...')
-    asm_dirs = (
-     [paths['o'] + '/asm/' + dir + '/contigs.fasta' for dir in
-     filter(lambda d: d.startswith(str(i)), os.listdir(paths['o'] + '/asm'))])
-    cmd_vars = {
-     'i':str(i),
-     'asm_dirs':' '.join(asm_dirs),
-     'ref_len':target_genome_len,
-     'path_ref':paths['ref'],
-     'sample_name':sample_name,
-     'path_o':paths['o'],
-     'threads':threads}
-    cmd = (
-     'python2 /usr/local/bin/quast.py {asm_dirs} -o {path_o}/eval/{i}.{sample_name} '
-     '--threads {threads} '
-     '--gene-finding'.format(**cmd_vars))
-    if reference:
-        cmd += ' -R {path_ref}'.format(**cmd_vars)
-    if target_genome_len:
-        cmd += ' --est-ref-size {ref_len}'.format(**cmd_vars)
-    logger.info(cmd)
-    cmd_run = run(cmd)
-    logger.info(cmd_run.stdout)
-    print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_EVAL')
-
-
 def report(start_time, end_time, paths):
     elapsed_time = end_time - start_time
     with open(paths['o'] + '/summary.txt', 'w') as report:
