@@ -1,13 +1,4 @@
-<<<<<<< HEAD
 #!/usr/bin/env python3
-=======
-#!/usr/bin/env python
-
-# SparNA: A pipeline for assembling deep-sequenced viral amplicon reads
-# Copyright 2015 Bede Constantinides, University of Manchester (b|at|bede|dot|im)
-# Developed in collaboration with Public Health England, Colindale
-# Distributed under the GNU General Public License version 3 (see LICENSE)
->>>>>>> 39c1c9683fff9a4318b1b0831fcc17065020ff2a
 
 # TODO
 # | Handle no reads mapped by BWA
