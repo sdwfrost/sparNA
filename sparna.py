@@ -81,7 +81,7 @@ def import_reads(fwd_fq, rev_fq, params):
 
 def trim(params):
     print('Trimming...')
-    cmds = [
+    cmd = (
      'java -jar {pipe}/res/trimmomatic-0.33.jar PE '
      '{out}/raw/{name}.f.fastq '
      '{out}/raw/{name}.r.fastq '
@@ -89,17 +89,15 @@ def trim(params):
      '{out}/trim/{name}.trim.f_se.fastq '
      '{out}/trim/{name}.trim.r_pe.fastq '
      '{out}/trim/{name}.trim.r_se.fastq '
-     'ILLUMINACLIP:{pipe}/res/illumina_adapters.fa:2:30:10 MINLEN:30',
-     'cat {out}/trim/{name}.trim.f_se.fastq {out}/trim/{name}.trim.r_se.fastq '
+     'ILLUMINACLIP:{pipe}/res/illumina_adapters.fa:2:30:10 MINLEN:30'
+     '&& cat {out}/trim/{name}.trim.f_se.fastq {out}/trim/{name}.trim.r_se.fastq '
      '> {out}/trim/{name}.trim.se.fastq '
      '&& interleave-reads.py {out}/trim/{name}.trim.f_pe.fastq {out}/trim/{name}.trim.r_pe.fastq '
-     '> {out}/trim/{name}.trim.fr_pe.fastq']
-    cmds = [cmd.format(**params) for cmd in cmds]
-    for cmd in cmds:
-        logger.info(cmd)
-        cmd_run = run(cmd)
-        logger.info(cmd_run.stdout)
-        print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_TRIM')
+     '> {out}/trim/{name}.trim.fr_pe.fastq'.format(**params))
+    logger.info(cmd)
+    cmd_run = run(cmd)
+    logger.info(cmd_run.stdout)
+    print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_TRIM')
 
 
 def normalise(norm_c_list, norm_k_list, params, threads):
@@ -141,31 +139,35 @@ def normalise(norm_c_list, norm_k_list, params, threads):
 
 
 def assemble(norm_perms, asm_k_list, params, threads):
+    '''
+    Performs multiple assemblies and returns and OrderedDict of assembly names and paths
+    '''
     print('Assembling...')
     asm_perms = [{'k':p['k'],'c':p['c']} for p in norm_perms]
     cmds_asm = []
     for asm_perm in asm_perms:
         cmd_vars = {
-         'k':str(asm_perm['k']),
-         'c':str(asm_perm['c']),
-         'asm_k_list':asm_k_list,
-         'out':params['out'],
-         'name':params['name'],
-         'threads':threads}
-        cmd_asm = ''
+        'k':str(asm_perm['k']),
+        'c':str(asm_perm['c']),
+        'asm_k_list':asm_k_list,
+        'out':params['out'],
+        'name':params['name'],
+        'threads':threads}
+        cmd_asm = (
         'python2 /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
         '--pe1-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq '
         '--pe1-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq '
         '--s1 {out}/norm/{name}.norm_k{k}c{c}.se.fastq '
-        '-o {out}/asm/{name}.norm_k{k}c{c}.asm_k{asm_k_list} --careful'.format(**cmd_vars)
+        '-o {out}/asm/{name}.norm_k{k}c{c}.asm_k{asm_k_list} --careful'.format(**cmd_vars))
         cmds_asm.append(cmd_asm)
         print('\tAssembling norm_c={c}, norm_k={k}, asm_k={asm_k_list}'.format(**cmd_vars))
-    with open(os.devnull, 'w') as devnull:
-        processes = [subprocess.Popen(cmd, shell=True, stdout=devnull) for cmd in cmds_asm]
-        for process in processes:
-            process.wait()
-            print('\tDone') if process.returncode == 0 else sys.exit('ERR_ASM')
-    return os.listdir(params['out'] + '/asm')
+    with multiprocessing.Pool(threads) as pool:
+        results = pool.map(run, cmds_asm)
+    logger.info([result.stdout for result in results])
+    print('\tDone') if not max([r.returncode for r in results]) else sys.exit('ERR_TRIM')
+    asm_names = os.listdir(params['out'] + '/asm')
+    asm_paths = [params['out'] + '/asm/' + asm_name + '/contigs.fasta' for asm_name in asm_names]
+    return OrderedDict(zip(asm_names, asm_paths))
 
 
 def build_ebi_blast_query(title, sequence):
@@ -266,7 +268,8 @@ def ebi_annotated_blast(query):
             annotations = list(fetch_annotation(hit[1], hit[2]) for hit in hits)
             hits_annotations = list(zip(hits, annotations))
             logger.info(status.text + ' ' + call.text)
-            print(time.time() - start_time)
+            print('\t\tQuery ' + query['title'])
+            # print(time.time() - start_time)
             break
         elif time.time() - start_time > 120:
             print('blast timeout')
@@ -280,7 +283,7 @@ def ebi_annotated_blast(query):
             break
     return (query['title'], hits_annotations)
 
-def fasta_blaster(fasta, seq_limit=0):
+def fasta_blaster(fasta, seq_limit=10):
     '''
     CONTAINS TESTING CODE
     Returns BLAST results as an OrderedDict of ebi_blast() or ebi_annotated_blast() output
@@ -295,20 +298,29 @@ def fasta_blaster(fasta, seq_limit=0):
                  ('seq_2', [((blast, tab, output, fields), SeqRecord),
                             ((blast, tab, output, fields), SeqRecord)])])
     '''
-    records = collections.OrderedDict()
+    records = OrderedDict()
     with open(fasta, 'r') as fasta_file:
-        for i, record in SeqIO.parse(fasta_file, 'fasta'):
+        for record in SeqIO.parse(fasta_file, 'fasta'):
             records[record.id] = record.seq
-            if seq_limit and i >= seq_limit:
-                break
-    # JUST FOR TESTING
-    queries = [build_ebi_blast_query(title, seq) for title, seq in records.items()][0:6]
+
+    queries = [build_ebi_blast_query(title, seq) for title, seq in records.items()][0:seq_limit+1]
     
     with multiprocessing.Pool(30) as pool:
         results_tuple = pool.map(ebi_annotated_blast, queries)
     
-    results = collections.OrderedDict(results_tuple)
+    results = OrderedDict(results_tuple)
     return results
+
+def blast_assemblies(asm_names_paths):
+    '''
+    Returns BLAST hit information for a dict of assembly names and corresponding paths 
+    '''
+    print('BLASTING assemblies...')
+    sample_results = []
+    for asm_name, asm_path in asm_names_paths.items():
+        print('\tAssembly {}'.format(asm_name))
+        sample_results.append(fasta_blaster(asm_path))
+    return sample_results
 
 
 def map_to_assemblies(params, threads):
@@ -370,7 +382,7 @@ def report(start_time, end_time, params):
     elapsed_time = end_time - start_time
     with open(params['out'] + '/summary.txt', 'w') as report:
         report.write('wall_time\t{}'.format(elapsed_time))
-        print('\tWall time: {0:.{1}f}s'.format(elapsed_time, 1))
+        print('Wall time: {0:.{1}f}s'.format(elapsed_time, 1))
 
 
 def main(
@@ -389,9 +401,9 @@ def main(
     import_reads(fwd_fq, rev_fq, params)
     trim(params)
     norm_perms = normalise(norm_c_list, norm_k_list, params, threads)
-    assemblies = assemble(norm_perms, asm_k_list, params, threads)
-    # blast_results = fasta_blaster(params['out'] + '/asm/' +  best_asms[name][0] + '/contigs.fasta')
-    remap_stats = map_to_assemblies(params, threads)
+    asm_names_paths = assemble(norm_perms, asm_k_list, params, threads)
+    blast_results = blast_assemblies(asm_names_paths)
+    # remap_stats = map_to_assemblies(params, threads)
     report(start_time, time.time(), params)
 
 
