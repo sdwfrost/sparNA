@@ -61,20 +61,21 @@ def run(cmd):
                           stderr=subprocess.STDOUT)
 
 def name_sample(fwd_fq):
-    fwd_fq_prefix = os.path.splitext(os.path.split(fwd_fq)[0])[0]
+    fwd_fq_prefix = os.path.splitext(os.path.split(fwd_fq)[1])[0]
     return fwd_fq_prefix
 
 
 def import_reads(fwd_fq, rev_fq, params):
     print('Importing reads...')
-    cmd_run = ''
-     'ln -s {fwd_fq} {out}/raw/{name}.f.fastq '
-     '&& ln -s {rev_fq} {out}/raw/{name}.r.fastq '
-     '&& interleave-reads.py {out}/raw/{name}.f.fastq {out}/raw/{name}.r.fastq '
-     '> {out}/raw/{name}.fr.fastq'.format(**params)
+    cmd = (''
+    'ln -s {fwd_fq} {out}/raw/{name}.f.fastq '
+    '&& ln -s {rev_fq} {out}/raw/{name}.r.fastq '
+    '&& interleave-reads.py {out}/raw/{name}.f.fastq {out}/raw/{name}.r.fastq '
+    '> {out}/raw/{name}.fr.fastq'
+    .format(out=params['out'], name=params['name'], fwd_fq=fwd_fq, rev_fq=rev_fq))
     logger.info(cmd)
     cmd_run = run(cmd)
-    logger.info(cmd_run.stdout)
+    logger.info(cmd_run.stdout, cmd_run.stderr)
     print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_IMPORT')
 
 
@@ -101,9 +102,9 @@ def trim(params):
         print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_TRIM')
 
 
-def normalise(norm_cov_list, norm_k_list, params, threads):
+def normalise(norm_c_list, norm_k_list, params, threads):
     print('Normalising...')
-    cs = norm_cov_list.split(',')
+    cs = norm_c_list.split(',')
     ks = norm_k_list.split(',')
     norm_perms = [{'k':k, 'c':c} for k in ks for c in cs]
     cmds = []
@@ -130,8 +131,8 @@ def normalise(norm_cov_list, norm_k_list, params, threads):
          '{out}/norm/{name}.norm_k{k}c{c}.pe_and_se.fastq'
          .format(**cmd_vars))
         cmds.append(cmd)
-        print('\tNormalising norm_k={k},norm_c={c}'.format(**cmd_vars))
-        logger.info('Normalising norm_k={k},norm_c={c}'.format(**cmd_vars))
+        print('\tNormalising norm_c={c}, norm_k={k}'.format(**cmd_vars))
+        logger.info('Normalising norm_c={c}, norm_k={k}'.format(**cmd_vars))
     with multiprocessing.Pool(threads) as pool:
         results = pool.map(run, cmds)
     logger.info([result.stdout for result in results])
@@ -152,14 +153,13 @@ def assemble(norm_perms, asm_k_list, params, threads):
          'name':params['name'],
          'threads':threads}
         cmd_asm = ''
-         'python2 /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
-         '--pe1-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq '
-         '--pe1-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq '
-         '--s1 {out}/norm/{name}.norm_k{k}c{c}.se.fastq '
-         '-o {out}/asm/{name}.norm_k{k}c{c}.asm_k{asm_k_list} --careful'
-         .format(**cmd_vars)
+        'python2 /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
+        '--pe1-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq '
+        '--pe1-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq '
+        '--s1 {out}/norm/{name}.norm_k{k}c{c}.se.fastq '
+        '-o {out}/asm/{name}.norm_k{k}c{c}.asm_k{asm_k_list} --careful'.format(**cmd_vars)
         cmds_asm.append(cmd_asm)
-        print('\tAssembling norm_k={k},norm_c={c},asm_k={asm_k_list}'.format(**cmd_vars))
+        print('\tAssembling norm_c={c}, norm_k={k}, asm_k={asm_k_list}'.format(**cmd_vars))
     with open(os.devnull, 'w') as devnull:
         processes = [subprocess.Popen(cmd, shell=True, stdout=devnull) for cmd in cmds_asm]
         for process in processes:
@@ -374,24 +374,24 @@ def report(start_time, end_time, params):
 
 
 def main(
-    fwd_fq=None, rev_fq=None, norm_cov_list=None, norm_k_list=None, asm_k_list=None,
-    untrusted_contigs=False, out_dir='sparna_out', threads=1):
+    fwd_fq=None, rev_fq=None, norm_c_list=None, norm_k_list=None, asm_k_list=None,
+    untrusted_contigs=False, out_dir='', threads=1):
     
     # Setup
     start_time = int(time.time())
     params = {
-     'name': name_sample(),
-     'out': out_dir + '/' +  name,
+     'name': name_sample(fwd_fq),
+     'out': out_dir + 'sparna_' + name_sample(fwd_fq),
      'pipe': os.path.dirname(os.path.realpath(__file__))}
-    for dir in ['in', 'trim', 'norm', 'asm', 'remap', 'eval']:
+    for dir in ['raw', 'trim', 'norm', 'asm', 'remap', 'eval']:
         os.makedirs(params['out'] + '/' + dir)
 
     import_reads(fwd_fq, rev_fq, params)
     trim(params)
-    norm_perms = normalise(norm_cov_list, norm_k_list, params, threads)
+    norm_perms = normalise(norm_c_list, norm_k_list, params, threads)
     assemblies = assemble(norm_perms, asm_k_list, params, threads)
     # blast_results = fasta_blaster(params['out'] + '/asm/' +  best_asms[name][0] + '/contigs.fasta')
-    remap_stats = map_to_assemblies(name, params, threads, i)
+    remap_stats = map_to_assemblies(params, threads)
     report(start_time, time.time(), params)
 
 
