@@ -48,6 +48,8 @@ from collections import OrderedDict
 
 from Bio import SeqIO
 
+from pprint import pprint
+
 
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -285,7 +287,7 @@ def ebi_annotated_blast(query):
 
 def fasta_blaster(fasta, seq_limit=10):
     '''
-    CONTAINS TESTING CODE
+    NEEDS UPDATING FOR NESTED ORDEREDDICTS
     Returns BLAST results as an OrderedDict of ebi_blast() or ebi_annotated_blast() output
     ebi_blast():
     OrderedDict([('seq_1', [(blast, tab, output, fields),
@@ -304,22 +306,19 @@ def fasta_blaster(fasta, seq_limit=10):
             records[record.id] = record.seq
 
     queries = [build_ebi_blast_query(title, seq) for title, seq in records.items()][0:seq_limit+1]
-    
     with multiprocessing.Pool(30) as pool:
-        results_tuple = pool.map(ebi_annotated_blast, queries)
-    
-    results = OrderedDict(results_tuple)
-    return results
+        results = pool.map(ebi_annotated_blast, queries)
+    return OrderedDict(results)
 
 def blast_assemblies(asm_names_paths):
     '''
     Returns BLAST hit information for a dict of assembly names and corresponding paths 
     '''
     print('BLASTING assemblies...')
-    sample_results = []
+    sample_results = OrderedDict()
     for asm_name, asm_path in asm_names_paths.items():
         print('\tAssembly {}'.format(asm_name))
-        sample_results.append(fasta_blaster(asm_path))
+        sample_results[asm_name] = fasta_blaster(asm_path)
     return sample_results
 
 
@@ -405,6 +404,7 @@ def main(
     blast_results = blast_assemblies(asm_names_paths)
     # remap_stats = map_to_assemblies(params, threads)
     report(start_time, time.time(), params)
+    pprint(blast_results)
 
 
 argh.dispatch_command(main)
