@@ -304,9 +304,11 @@ def fasta_blaster(fasta, seq_limit=10):
         for record in SeqIO.parse(fasta_file, 'fasta'):
             records[record.id] = record.seq
 
-    queries = [build_ebi_blast_query(title, seq) for title, seq in records.items()][0:seq_limit+1]
+    queries = [build_ebi_blast_query(title, seq) for title, seq in records.items()]
     with multiprocessing.Pool(30) as pool:
-        results = pool.map(ebi_annotated_blast, queries)
+        results = pool.map(ebi_annotated_blast, queries[0:seq_limit+1])
+        if len(queries) > seq_limit:
+            results += zip([q['title'] for q in queries[seq_limit+1:]], [None]*len(queries[seq_limit+1:]))
     return OrderedDict(results)
 
 def blast_assemblies(asms_paths):
@@ -320,6 +322,21 @@ def blast_assemblies(asms_paths):
         sample_results[asm_name] = fasta_blaster(asm_path)
     return sample_results
 
+def blast_superkingdoms(blast_results):
+    asms_superkingdoms = {}
+    for asm, contigs in blast_results.items():
+        asm_superkingdoms = []
+        for contig, hits in contigs.items():
+            if hits: # Hits found
+                top_hit_superkingdom = hits[0][1].annotations['taxonomy'][0]
+                asm_superkingdoms.append(top_hit_superkingdom)
+            elif type(hits) is list: # Zero hits
+                asm_superkingdoms.append(False)
+            elif hits is None: # Not searched
+                asm_superkingdoms.append(None)
+            assert hits or type(hits) is list or hits is None
+        asms_superkingdoms[asm] = asm_superkingdoms
+    return asms_superkingdoms
 
 def map_to_assemblies(asms_paths, params):
     '''
@@ -329,7 +346,7 @@ def map_to_assemblies(asms_paths, params):
     Returns dict of tuples containing contig_len and n_reads_mapped for each contig
     '''
     print('Aligning to assemblies... (Bowtie2)')
-    remap_stats = {}
+    asms_coverages = {}
     for asm, asm_path in asms_paths.items():
         cmd_vars = {**params,
                     'asm':asm,
@@ -358,7 +375,7 @@ def map_to_assemblies(asms_paths, params):
         with open('{out}/remap/{asm}.bt2.stats'.format(**cmd_vars), 'r') as bt2_stats:
             map_prop = float(bt2_stats.read().partition('% overall')[0].split('\n')[-1].strip())/100
         
-        asms_coverages = []
+        asm_coverages = []
         with open('{out}/remap/{asm}.uniq.bam.stats'.format(**cmd_vars), 'r') as bam_stats:
             for line in bam_stats:
                 reads_mapped = int(line.strip().split('\t')[2])
@@ -397,17 +414,16 @@ def main(
     asms_names = {a: [r.id for r in SeqIO.parse(p, 'fasta')] for a, p in asms_paths.items()}
     asms_lens = {a: [int(n.split('_')[3]) for n in ns] for a, ns in asms_names.items()}
     asms_covs = map_to_assemblies(asms_paths, params)
-    asm_stats = {'names': asm_names,
-                 'lens': asm_lens,
+    asm_stats = {'names': asms_names,
+                 'lens': asms_lens,
                  'covs': asms_covs,
-                 'superkingdom': None,
+                 'superkingdoms': blast_superkingdoms(blast_results),
                  'gc': None,
                  'cpg': None}
 
 
     pprint(asm_stats)
-    print('\n')
-    pprint(blast_results)
+    # pprint(blast_results)
 
     report(start_time, time.time(), params)
 
