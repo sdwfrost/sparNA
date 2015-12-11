@@ -344,8 +344,8 @@ def gc_content(asms_paths):
     for asm, path in asms_paths.items():
         asm_gc = []
         for record in SeqIO.parse(path, 'fasta'):
-            asm_gc.append(SeqUtils.GC(record.seq))
-    asms_gc[asm] = asm_gc
+            asm_gc.append(SeqUtils.GC(record.seq)/100)
+        asms_gc[asm] = asm_gc
     return asms_gc
 
 def map_to_assemblies(asms_paths, params):
