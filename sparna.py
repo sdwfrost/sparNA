@@ -47,6 +47,7 @@ import multiprocessing
 from collections import OrderedDict
 
 from Bio import SeqIO
+from Bio import SeqUtils
 
 from pprint import pprint
 
@@ -338,6 +339,15 @@ def blast_superkingdoms(blast_results):
         asms_superkingdoms[asm] = asm_superkingdoms
     return asms_superkingdoms
 
+def gc_content(asms_paths):
+    asms_gc = {}
+    for asm, path in asms_paths.items():
+        asm_gc = []
+        for record in SeqIO.parse(path, 'fasta'):
+            asm_gc.append(SeqUtils.GC(record.seq))
+    asms_gc[asm] = asm_gc
+    return asms_gc
+
 def map_to_assemblies(asms_paths, params):
     '''
     Map original reads to each assembly with Bowtie2
@@ -418,7 +428,7 @@ def main(
                  'lens': asms_lens,
                  'covs': asms_covs,
                  'superkingdoms': blast_superkingdoms(blast_results),
-                 'gc': None,
+                 'gc': gc_content(asms_paths),
                  'cpg': None}
 
 
