@@ -69,40 +69,41 @@ def name_sample(fwd_fq):
 
 def import_reads(fwd_fq, rev_fq, params):
     print('Importing reads...')
-    cmd = (''
+    cmd = (
     'ln -s {fwd_fq} {out}/raw/{name}.f.fastq '
     '&& ln -s {rev_fq} {out}/raw/{name}.r.fastq '
     '&& interleave-reads.py {out}/raw/{name}.f.fastq {out}/raw/{name}.r.fastq '
     '> {out}/raw/{name}.fr.fastq'
-    .format(out=params['out'], name=params['name'], fwd_fq=fwd_fq, rev_fq=rev_fq))
+    .format(**params, fwd_fq=fwd_fq, rev_fq=rev_fq))
     logger.info(cmd)
     cmd_run = run(cmd)
-    logger.info(cmd_run.stdout, cmd_run.stderr)
+    # logger.info(cmd_run.stdout, cmd_run.stderr)
     print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_IMPORT')
 
 
 def trim(params):
     print('Trimming...')
     cmd = (
-     'java -jar {pipe}/res/trimmomatic-0.33.jar PE '
-     '{out}/raw/{name}.f.fastq '
-     '{out}/raw/{name}.r.fastq '
-     '{out}/trim/{name}.trim.f_pe.fastq '
-     '{out}/trim/{name}.trim.f_se.fastq '
-     '{out}/trim/{name}.trim.r_pe.fastq '
-     '{out}/trim/{name}.trim.r_se.fastq '
-     'ILLUMINACLIP:{pipe}/res/illumina_adapters.fa:2:30:10 MINLEN:30'
-     '&& cat {out}/trim/{name}.trim.f_se.fastq {out}/trim/{name}.trim.r_se.fastq '
-     '> {out}/trim/{name}.trim.se.fastq '
-     '&& interleave-reads.py {out}/trim/{name}.trim.f_pe.fastq {out}/trim/{name}.trim.r_pe.fastq '
-     '> {out}/trim/{name}.trim.fr_pe.fastq'.format(**params))
+    'java -jar {pipe}/res/trimmomatic-0.33.jar PE '
+    '{out}/raw/{name}.f.fastq '
+    '{out}/raw/{name}.r.fastq '
+    '{out}/trim/{name}.trim.f_pe.fastq '
+    '{out}/trim/{name}.trim.f_se.fastq '
+    '{out}/trim/{name}.trim.r_pe.fastq '
+    '{out}/trim/{name}.trim.r_se.fastq '
+    'ILLUMINACLIP:{pipe}/res/illumina_adapters.fa:2:30:10 MINLEN:30 '
+    '&& cat {out}/trim/{name}.trim.f_se.fastq {out}/trim/{name}.trim.r_se.fastq '
+    '> {out}/trim/{name}.trim.se.fastq '
+    '&& interleave-reads.py {out}/trim/{name}.trim.f_pe.fastq {out}/trim/{name}.trim.r_pe.fastq '
+    '> {out}/trim/{name}.trim.fr_pe.fastq'
+    .format(**params))
     logger.info(cmd)
     cmd_run = run(cmd)
-    logger.info(cmd_run.stdout)
+    logger.info(cmd_run.stderr)
     print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_TRIM')
 
 
-def normalise(norm_c_list, norm_k_list, params, threads):
+def normalise(norm_c_list, norm_k_list, params):
     print('Normalising...')
     cs = norm_c_list.split(',')
     ks = norm_k_list.split(',')
@@ -110,51 +111,48 @@ def normalise(norm_c_list, norm_k_list, params, threads):
     cmds = []
     for norm_perm in norm_perms:
         cmd_vars = {
-         'k':str(norm_perm['k']),
-         'c':str(norm_perm['c']),
-         'pipe':params['pipe'],
-         'out':params['out'],
-         'name':params['name']}
+        'k':str(norm_perm['k']),
+        'c':str(norm_perm['c']),
+        'pipe':params['pipe'],
+        'out':params['out'],
+        'name':params['name']}
         cmd = (
-         'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9 -p '
-         '{out}/trim/{name}.trim.fr_pe.fastq '
-         '-o {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq '
-         '&& normalize-by-median.py -C {c} -k {k} -N 1 -x 1e9 '
-         '{out}/trim/{name}.trim.se.fastq '
-         '-o {out}/norm/{name}.norm_k{k}c{c}.se.fastq '
-         '&& split-paired-reads.py '
-         '-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq '
-         '-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq '
-         '{out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq '
-         '&& cat {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq '
-         '{out}/norm/{name}.norm_k{k}c{c}.se.fastq > '
-         '{out}/norm/{name}.norm_k{k}c{c}.pe_and_se.fastq'
-         .format(**cmd_vars))
+        'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9 -p '
+        '{out}/trim/{name}.trim.fr_pe.fastq '
+        '-o {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq '
+        '&& normalize-by-median.py -C {c} -k {k} -N 1 -x 1e9 '
+        '{out}/trim/{name}.trim.se.fastq '
+        '-o {out}/norm/{name}.norm_k{k}c{c}.se.fastq '
+        '&& split-paired-reads.py '
+        '-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq '
+        '-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq '
+        '{out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq '
+        '&& cat {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq '
+        '{out}/norm/{name}.norm_k{k}c{c}.se.fastq > '
+        '{out}/norm/{name}.norm_k{k}c{c}.pe_and_se.fastq'.format(**cmd_vars))
         cmds.append(cmd)
         print('\tNormalising norm_c={c}, norm_k={k}'.format(**cmd_vars))
         logger.info('Normalising norm_c={c}, norm_k={k}'.format(**cmd_vars))
-    with multiprocessing.Pool(threads) as pool:
+    with multiprocessing.Pool(params['threads']) as pool:
         results = pool.map(run, cmds)
     logger.info([result.stdout for result in results])
-    print('\tDone')
+    print('\tAll done') if not max([r.returncode for r in results]) else sys.exit('ERR_NORM')
     return norm_perms
 
 
-def assemble(norm_perms, asm_k_list, params, threads):
+def assemble(norm_perms, asm_k_list, params):
     '''
     Performs multiple assemblies and returns and OrderedDict of assembly names and paths
+    **PYTHON2**
     '''
     print('Assembling...')
     asm_perms = [{'k':p['k'],'c':p['c']} for p in norm_perms]
     cmds_asm = []
     for asm_perm in asm_perms:
-        cmd_vars = {
-        'k':str(asm_perm['k']),
-        'c':str(asm_perm['c']),
-        'asm_k_list':asm_k_list,
-        'out':params['out'],
-        'name':params['name'],
-        'threads':threads}
+        cmd_vars = {**params,
+                    'k':str(asm_perm['k']),
+                    'c':str(asm_perm['c']),
+                    'asm_k_list':asm_k_list}
         cmd_asm = (
         'python2 /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
         '--pe1-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq '
@@ -163,13 +161,13 @@ def assemble(norm_perms, asm_k_list, params, threads):
         '-o {out}/asm/{name}.norm_k{k}c{c}.asm_k{asm_k_list} --careful'.format(**cmd_vars))
         cmds_asm.append(cmd_asm)
         print('\tAssembling norm_c={c}, norm_k={k}, asm_k={asm_k_list}'.format(**cmd_vars))
-    with multiprocessing.Pool(threads) as pool:
+    with multiprocessing.Pool(params['threads']) as pool:
         results = pool.map(run, cmds_asm)
     logger.info([result.stdout for result in results])
-    print('\tDone') if not max([r.returncode for r in results]) else sys.exit('ERR_TRIM')
-    asm_names = os.listdir(params['out'] + '/asm')
-    asm_paths = [params['out'] + '/asm/' + asm_name + '/contigs.fasta' for asm_name in asm_names]
-    return OrderedDict(zip(asm_names, asm_paths))
+    print('\tAll done') if not max([r.returncode for r in results]) else sys.exit('ERR_ASM')
+    asms = os.listdir(params['out'] + '/asm')
+    asm_paths = [params['out'] + '/asm/' + asm + '/contigs.fasta' for asm in asms]
+    return OrderedDict(zip(asms, asm_paths))
 
 
 def build_ebi_blast_query(title, sequence):
@@ -269,6 +267,7 @@ def ebi_annotated_blast(query):
             annotations_items = [hit[1] + hit[2] for hit in hits] # all there
             annotations = list(fetch_annotation(hit[1], hit[2]) for hit in hits)
             hits_annotations = list(zip(hits, annotations))
+            # hits_annotations = list(zip(hits)) TESTING WITHOUT SEQRECORD
             logger.info(status.text + ' ' + call.text)
             print('\t\tQuery ' + query['title'])
             # print(time.time() - start_time)
@@ -310,19 +309,19 @@ def fasta_blaster(fasta, seq_limit=10):
         results = pool.map(ebi_annotated_blast, queries)
     return OrderedDict(results)
 
-def blast_assemblies(asm_names_paths):
+def blast_assemblies(asms_paths):
     '''
     Returns BLAST hit information for a dict of assembly names and corresponding paths 
     '''
-    print('BLASTING assemblies...')
+    print('BLASTing assemblies...')
     sample_results = OrderedDict()
-    for asm_name, asm_path in asm_names_paths.items():
+    for asm_name, asm_path in asms_paths.items():
         print('\tAssembly {}'.format(asm_name))
         sample_results[asm_name] = fasta_blaster(asm_path)
     return sample_results
 
 
-def map_to_assemblies(params, threads):
+def map_to_assemblies(asms_paths, params):
     '''
     Map original reads to each assembly with Bowtie2
     Record mapping statistics
@@ -330,31 +329,24 @@ def map_to_assemblies(params, threads):
     Returns dict of tuples containing contig_len and n_reads_mapped for each contig
     '''
     print('Aligning to assemblies... (Bowtie2)')
-    asm_names = filter(lambda d: d.startswith(str(i)), os.listdir(params['out'] + '/asm'))
-    asm_names_params = {a:params['out'] + '/asm/' + a + '/contigs.fasta' for a in asm_names}
     remap_stats = {}
-    for asm_name, asm_path in asm_names_params.items():
-        cmd_vars = {
-         'i':str(i),
-         'name':name,
-         'pipe':params['pipe'],
-         'path_o':params['out'],
-         'threads':threads,
-         'asm_name':asm_name,
-         'path_asm':asm_path}
+    for asm, asm_path in asms_paths.items():
+        cmd_vars = {**params,
+                    'asm':asm,
+                    'asm_path':asm_path}
         cmds = [
-         'bowtie2-build -q {path_asm} {path_o}/remap/{asm_name}',
-         'bowtie2 -x {path_o}/remap/{asm_name} --no-unal --very-sensitive-local --threads {threads}'
-         ' -1 {path_o}/raw/{name}.f.fastq'
-         ' -2 {path_o}/raw/{name}.r.fastq'
-         ' -S {path_o}/remap/{asm_name}.sam'
-         ' 2> {path_o}/remap/{asm_name}.bt2.stats',
-         'grep -v XS:i: {path_o}/remap/{asm_name}.sam > {path_o}/remap/{asm_name}.uniq.sam',
-         'samtools view -bS {path_o}/remap/{asm_name}.uniq.sam'
-         ' | samtools sort - {path_o}/remap/{asm_name}.uniq',
-         'samtools index {path_o}/remap/{asm_name}.uniq.bam',
-         'samtools idxstats {path_o}/remap/{asm_name}.uniq.bam'
-         ' > {path_o}/remap/{asm_name}.uniq.bam.stats']
+        'bowtie2-build -q {asm_path} {out}/remap/{asm}',
+        'bowtie2 -x {out}/remap/{asm} --no-unal --very-sensitive-local --threads {threads}'
+        ' -1 {out}/raw/{name}.f.fastq'
+        ' -2 {out}/raw/{name}.r.fastq'
+        ' -S {out}/remap/{asm}.sam'
+        ' 2> {out}/remap/{asm}.bt2.stats',
+        'grep -v XS:i: {out}/remap/{asm}.sam > {out}/remap/{asm}.uniq.sam',
+        'samtools view -bS {out}/remap/{asm}.uniq.sam'
+        ' | samtools sort - {out}/remap/{asm}.uniq',
+        'samtools index {out}/remap/{asm}.uniq.bam',
+        'samtools idxstats {out}/remap/{asm}.uniq.bam'
+        ' > {out}/remap/{asm}.uniq.bam.stats']
         cmds = [cmd.format(**cmd_vars) for cmd in cmds]
         for cmd in cmds:
             logger.info(cmd)
@@ -363,18 +355,17 @@ def map_to_assemblies(params, threads):
             cmd_prefix = cmd.split(' ')[0]
             print('\tDone (' +cmd_prefix+ ')') if cmd_run.returncode == 0 else sys.exit('ERR_REMAP')
         
-        with open('{path_o}/remap/{asm_name}.bt2.stats'.format(**cmd_vars), 'r') as bt2_stats:
+        with open('{out}/remap/{asm}.bt2.stats'.format(**cmd_vars), 'r') as bt2_stats:
             map_prop = float(bt2_stats.read().partition('% overall')[0].split('\n')[-1].strip())/100
         
-        contig_stats = []
-        with open('{path_o}/remap/{asm_name}.uniq.bam.stats'.format(**cmd_vars), 'r') as bam_stats:
+        asms_coverages = []
+        with open('{out}/remap/{asm}.uniq.bam.stats'.format(**cmd_vars), 'r') as bam_stats:
             for line in bam_stats:
-                contig_name, contig_len, reads_mapped = line.strip().split('\t')[0:3]
-                contig_stats.append((contig_name, int(contig_len), int(reads_mapped)))
+                reads_mapped = int(line.strip().split('\t')[2])
+                asm_coverages.append(int(reads_mapped))
         
-        remap_stats[asm_name] = contig_stats
-    print(remap_stats)
-    return remap_stats
+        asms_coverages[asm] = asm_coverages
+    return asms_coverages
 
 
 def report(start_time, end_time, params):
@@ -386,25 +377,39 @@ def report(start_time, end_time, params):
 
 def main(
     fwd_fq=None, rev_fq=None, norm_c_list=None, norm_k_list=None, asm_k_list=None,
-    untrusted_contigs=False, out_dir='', threads=1):
+    untrusted_contigs=False, out_dir='', threads=4):
     
-    # Setup
     start_time = int(time.time())
     params = {
-     'name': name_sample(fwd_fq),
-     'out': out_dir + 'sparna_' + name_sample(fwd_fq),
-     'pipe': os.path.dirname(os.path.realpath(__file__))}
+    'name': name_sample(fwd_fq),
+    'out': out_dir + 'sparna_' + name_sample(fwd_fq),
+    'pipe': os.path.dirname(os.path.realpath(__file__)),
+    'threads': threads}
     for dir in ['raw', 'trim', 'norm', 'asm', 'remap', 'eval']:
         os.makedirs(params['out'] + '/' + dir)
 
     import_reads(fwd_fq, rev_fq, params)
     trim(params)
-    norm_perms = normalise(norm_c_list, norm_k_list, params, threads)
-    asm_names_paths = assemble(norm_perms, asm_k_list, params, threads)
-    blast_results = blast_assemblies(asm_names_paths)
-    # remap_stats = map_to_assemblies(params, threads)
-    report(start_time, time.time(), params)
+    norm_perms = normalise(norm_c_list, norm_k_list, params)
+    asms_paths = assemble(norm_perms, asm_k_list, params)
+    blast_results = blast_assemblies(asms_paths)
+
+    asms_names = {a: [r.id for r in SeqIO.parse(p, 'fasta')] for a, p in asms_paths.items()}
+    asms_lens = {a: [int(n.split('_')[3]) for n in ns] for a, ns in asms_names.items()}
+    asms_covs = map_to_assemblies(asms_paths, params)
+    asm_stats = {'names': asm_names,
+                 'lens': asm_lens,
+                 'covs': asms_covs,
+                 'superkingdom': None,
+                 'gc': None,
+                 'cpg': None}
+
+
+    pprint(asm_stats)
+    print('\n')
     pprint(blast_results)
+
+    report(start_time, time.time(), params)
 
 
 argh.dispatch_command(main)
