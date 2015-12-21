@@ -171,6 +171,63 @@ def assemble(norm_perms, asm_k_list, params):
     return OrderedDict(zip(asms, asm_paths))
 
 
+def gc_content(asms_paths):
+    asms_gc = {}
+    for asm, path in asms_paths.items():
+        asm_gc = []
+        for record in SeqIO.parse(path, 'fasta'):
+            asm_gc.append(SeqUtils.GC(record.seq)/100)
+        asms_gc[asm] = asm_gc
+    return asms_gc
+
+
+def map_to_assemblies(asms_paths, params):
+    '''
+    Map original reads to each assembly with Bowtie2
+    Record mapping statistics
+    Screen uniquely mapped reads and quantify reads mapped per contig
+    Returns dict of tuples containing contig_len and n_reads_mapped for each contig
+    '''
+    print('Aligning to assemblies... (Bowtie2)')
+    asms_coverages = {}
+    for asm, asm_path in asms_paths.items():
+        cmd_vars = {**params,
+                    'asm':asm,
+                    'asm_path':asm_path}
+        cmds = [
+        'bowtie2-build -q {asm_path} {out}/remap/{asm}',
+        'bowtie2 -x {out}/remap/{asm} --no-unal --very-sensitive-local --threads {threads}'
+        ' -1 {out}/raw/{name}.f.fastq'
+        ' -2 {out}/raw/{name}.r.fastq'
+        ' -S {out}/remap/{asm}.sam'
+        ' 2> {out}/remap/{asm}.bt2.stats',
+        'grep -v XS:i: {out}/remap/{asm}.sam > {out}/remap/{asm}.uniq.sam',
+        'samtools view -bS {out}/remap/{asm}.uniq.sam'
+        ' | samtools sort - {out}/remap/{asm}.uniq',
+        'samtools index {out}/remap/{asm}.uniq.bam',
+        'samtools idxstats {out}/remap/{asm}.uniq.bam'
+        ' > {out}/remap/{asm}.uniq.bam.stats']
+        cmds = [cmd.format(**cmd_vars) for cmd in cmds]
+        for cmd in cmds:
+            logger.info(cmd)
+            cmd_run = run(cmd)
+            logger.info(cmd_run.stdout)
+            cmd_prefix = cmd.split(' ')[0]
+            print('\tDone (' +cmd_prefix+ ')') if cmd_run.returncode == 0 else sys.exit('ERR_REMAP')
+        
+        with open('{out}/remap/{asm}.bt2.stats'.format(**cmd_vars), 'r') as bt2_stats:
+            map_prop = float(bt2_stats.read().partition('% overall')[0].split('\n')[-1].strip())/100
+        
+        asm_coverages = []
+        with open('{out}/remap/{asm}.uniq.bam.stats'.format(**cmd_vars), 'r') as bam_stats:
+            for line in bam_stats:
+                reads_mapped = int(line.strip().split('\t')[2])
+                asm_coverages.append(int(reads_mapped))
+        
+        asms_coverages[asm] = asm_coverages
+    return asms_coverages
+
+
 def build_ebi_blast_query(title, sequence):
     '''
     Returns dict of REST params for the EBI BLAST API
@@ -285,9 +342,10 @@ def ebi_annotated_blast(query):
             break
     return (query['title'], hits_annotations)
 
-def fasta_blaster(fasta, seq_limit=5):
+def fasta_blaster(fasta, max_seqs=5):
     '''
     NEEDS UPDATING FOR NESTED ORDEREDDICTS
+    MIN_LEN NEEDS IMPLEMENTING
     Returns BLAST results as an OrderedDict of ebi_blast() or ebi_annotated_blast() output
     ebi_blast():
     OrderedDict([('seq_1', [(blast, tab, output, fields),
@@ -307,9 +365,9 @@ def fasta_blaster(fasta, seq_limit=5):
 
     queries = [build_ebi_blast_query(title, seq) for title, seq in records.items()]
     with multiprocessing.Pool(30) as pool:
-        results = pool.map(ebi_annotated_blast, queries[0:seq_limit+1])
-        if len(queries) > seq_limit:
-            results += zip([q['title'] for q in queries[seq_limit+1:]], [None]*len(queries[seq_limit+1:]))
+        results = pool.map(ebi_annotated_blast, queries[0:max_seqs+1])
+        if len(queries) > max_seqs:
+            results += zip([q['title'] for q in queries[max_seqs+1:]], [None]*len(queries[max_seqs+1:]))
     return OrderedDict(results)
 
 def blast_assemblies(asms_paths):
@@ -347,7 +405,7 @@ def blast_summary(blast_results):
             if hits: # Hits found
                 description = hits[0][1].description[:40] + (hits[0][1].description[40:] and '…')
                 top_hit_summary = (''
-                'Contig: {1}<br>Top hit: {0}Accession: {2}:{3}'
+                '{1}<br>{0}<br>Accession: {2}:{3}'
                 '<br>Identity: {4}%<br>Alignment length: {5}<br>Mismatches: {6}<br>'
                 'E-value: {12}'.format(description, *hits[0][0]))
                 asm_summaries.append(top_hit_summary)
@@ -358,61 +416,6 @@ def blast_summary(blast_results):
             assert hits or type(hits) is list or hits is None
         asms_summaries[asm] = asm_summaries
     return asms_summaries
-
-def gc_content(asms_paths):
-    asms_gc = {}
-    for asm, path in asms_paths.items():
-        asm_gc = []
-        for record in SeqIO.parse(path, 'fasta'):
-            asm_gc.append(SeqUtils.GC(record.seq)/100)
-        asms_gc[asm] = asm_gc
-    return asms_gc
-
-def map_to_assemblies(asms_paths, params):
-    '''
-    Map original reads to each assembly with Bowtie2
-    Record mapping statistics
-    Screen uniquely mapped reads and quantify reads mapped per contig
-    Returns dict of tuples containing contig_len and n_reads_mapped for each contig
-    '''
-    print('Aligning to assemblies... (Bowtie2)')
-    asms_coverages = {}
-    for asm, asm_path in asms_paths.items():
-        cmd_vars = {**params,
-                    'asm':asm,
-                    'asm_path':asm_path}
-        cmds = [
-        'bowtie2-build -q {asm_path} {out}/remap/{asm}',
-        'bowtie2 -x {out}/remap/{asm} --no-unal --very-sensitive-local --threads {threads}'
-        ' -1 {out}/raw/{name}.f.fastq'
-        ' -2 {out}/raw/{name}.r.fastq'
-        ' -S {out}/remap/{asm}.sam'
-        ' 2> {out}/remap/{asm}.bt2.stats',
-        'grep -v XS:i: {out}/remap/{asm}.sam > {out}/remap/{asm}.uniq.sam',
-        'samtools view -bS {out}/remap/{asm}.uniq.sam'
-        ' | samtools sort - {out}/remap/{asm}.uniq',
-        'samtools index {out}/remap/{asm}.uniq.bam',
-        'samtools idxstats {out}/remap/{asm}.uniq.bam'
-        ' > {out}/remap/{asm}.uniq.bam.stats']
-        cmds = [cmd.format(**cmd_vars) for cmd in cmds]
-        for cmd in cmds:
-            logger.info(cmd)
-            cmd_run = run(cmd)
-            logger.info(cmd_run.stdout)
-            cmd_prefix = cmd.split(' ')[0]
-            print('\tDone (' +cmd_prefix+ ')') if cmd_run.returncode == 0 else sys.exit('ERR_REMAP')
-        
-        with open('{out}/remap/{asm}.bt2.stats'.format(**cmd_vars), 'r') as bt2_stats:
-            map_prop = float(bt2_stats.read().partition('% overall')[0].split('\n')[-1].strip())/100
-        
-        asm_coverages = []
-        with open('{out}/remap/{asm}.uniq.bam.stats'.format(**cmd_vars), 'r') as bam_stats:
-            for line in bam_stats:
-                reads_mapped = int(line.strip().split('\t')[2])
-                asm_coverages.append(int(reads_mapped))
-        
-        asms_coverages[asm] = asm_coverages
-    return asms_coverages
 
 
 def report(start_time, end_time, params):
@@ -439,11 +442,12 @@ def main(
     trim(params)
     norm_perms = normalise(norm_c_list, norm_k_list, params)
     asms_paths = assemble(norm_perms, asm_k_list, params)
-    blast_results = blast_assemblies(asms_paths)
-
+    
     asms_names = {a: [r.id for r in SeqIO.parse(p, 'fasta')] for a, p in asms_paths.items()}
     asms_lens = {a: [int(n.split('_')[3]) for n in ns] for a, ns in asms_names.items()}
     asms_covs = map_to_assemblies(asms_paths, params)
+    blast_results = blast_assemblies(asms_paths)
+    
     asm_stats = {'names': asms_names,
                  'lens': asms_lens,
                  'covs': asms_covs,
@@ -453,8 +457,8 @@ def main(
                  'cpg': None}
 
 
-    pprint(asm_stats)
-    pprint(blast_results)
+    print(asm_stats)
+    # pprint(blast_results)
 
     report(start_time, time.time(), params)
 
