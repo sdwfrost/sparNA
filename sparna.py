@@ -285,7 +285,7 @@ def ebi_annotated_blast(query):
             break
     return (query['title'], hits_annotations)
 
-def fasta_blaster(fasta, seq_limit=10):
+def fasta_blaster(fasta, seq_limit=5):
     '''
     NEEDS UPDATING FOR NESTED ORDEREDDICTS
     Returns BLAST results as an OrderedDict of ebi_blast() or ebi_annotated_blast() output
@@ -338,6 +338,26 @@ def blast_superkingdoms(blast_results):
             assert hits or type(hits) is list or hits is None
         asms_superkingdoms[asm] = asm_superkingdoms
     return asms_superkingdoms
+
+def blast_summary(blast_results):
+    asms_summaries = {}
+    for asm, contigs in blast_results.items():
+        asm_summaries = []
+        for contig, hits in contigs.items():
+            if hits: # Hits found
+                description = hits[0][1].description[:40] + (hits[0][1].description[40:] and '…')
+                top_hit_summary = (''
+                'Contig: {1}<br>Top hit: {0}Accession: {2}:{3}'
+                '<br>Identity: {4}%<br>Alignment length: {5}<br>Mismatches: {6}<br>'
+                'E-value: {12}'.format(description, *hits[0][0]))
+                asm_summaries.append(top_hit_summary)
+            elif type(hits) is list: # Zero hits
+                asm_summaries.append(False)
+            elif hits is None: # Not searched
+                asm_summaries.append(None)
+            assert hits or type(hits) is list or hits is None
+        asms_summaries[asm] = asm_summaries
+    return asms_summaries
 
 def gc_content(asms_paths):
     asms_gc = {}
@@ -403,7 +423,7 @@ def report(start_time, end_time, params):
 
 
 def main(
-    fwd_fq=None, rev_fq=None, norm_c_list=None, norm_k_list=None, asm_k_list=None,
+    fwd_fq=None, rev_fq=None, norm_c_list=None, norm_k_list=None, asm_k_list='21,33,55,77',
     untrusted_contigs=False, out_dir='', threads=4):
     
     start_time = int(time.time())
@@ -427,13 +447,14 @@ def main(
     asm_stats = {'names': asms_names,
                  'lens': asms_lens,
                  'covs': asms_covs,
-                 'superkingdoms': blast_superkingdoms(blast_results),
+                 'blast_summary': blast_summary(blast_results), 
+                 'blast_superkingdoms': blast_superkingdoms(blast_results),
                  'gc': gc_content(asms_paths),
                  'cpg': None}
 
 
     pprint(asm_stats)
-    # pprint(blast_results)
+    pprint(blast_results)
 
     report(start_time, time.time(), params)
 
