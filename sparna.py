@@ -421,7 +421,7 @@ def blast_summary(blast_results, asms_covs):
             if hits: # Hits found
                 description = hits[0][1].description[:40] + (hits[0][1].description[40:] and '…')
                 top_hit_summary = (''
-                'Coverage: {0} reads<br>{2}<br>{1}<br>Accession: {3}:{4}'
+                '{2}<br>Coverage: {0} reads<br>{1}<br>Accession: {3}:{4}'
                 '<br>Identity: {5}%<br>Alignment length: {6}<br>Mismatches: {7}<br>'
                 'E-value: {13}'.format(asms_covs[asm][i], description, *hits[0][0]))
                 asm_summaries.append(top_hit_summary)
