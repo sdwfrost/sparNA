@@ -49,7 +49,10 @@ from collections import OrderedDict
 from Bio import SeqIO
 from Bio import SeqUtils
 
-from pprint import pprint
+import plotly.plotly as py
+import plotly.graph_objs as go
+
+import pprint
 
 
 logging.basicConfig(level=logging.ERROR)
@@ -169,6 +172,16 @@ def assemble(norm_perms, asm_k_list, params):
     asms = os.listdir(params['out'] + '/asm')
     asm_paths = [params['out'] + '/asm/' + asm + '/contigs.fasta' for asm in asms]
     return OrderedDict(zip(asms, asm_paths))
+
+
+def prune_assemblies(asms_paths, blast_min_len, params):
+    asms_paths_pruned = OrderedDict()
+    for asm, path in asms_paths.items():
+        asms_paths_pruned[asm] = path.replace('/asm/', '/asm_prune/')
+        records = (r for r in SeqIO.parse(path, 'fasta') if len(r.seq) >= blast_min_len)
+        os.makedirs(asms_paths_pruned[asm].replace('/contigs.fasta', ''))
+        SeqIO.write(records, asms_paths_pruned[asm], 'fasta')
+    return asms_paths_pruned 
 
 
 def gc_content(asms_paths):
@@ -342,7 +355,7 @@ def ebi_annotated_blast(query):
             break
     return (query['title'], hits_annotations)
 
-def fasta_blaster(fasta, max_seqs=5):
+def fasta_blaster(fasta, max_seqs, min_len):
     '''
     NEEDS UPDATING FOR NESTED ORDEREDDICTS
     MIN_LEN NEEDS IMPLEMENTING
@@ -361,7 +374,8 @@ def fasta_blaster(fasta, max_seqs=5):
     records = OrderedDict()
     with open(fasta, 'r') as fasta_file:
         for record in SeqIO.parse(fasta_file, 'fasta'):
-            records[record.id] = record.seq
+            if len(record.seq) >= min_len:
+                records[record.id] = record.seq
 
     queries = [build_ebi_blast_query(title, seq) for title, seq in records.items()]
     with multiprocessing.Pool(30) as pool:
@@ -370,7 +384,7 @@ def fasta_blaster(fasta, max_seqs=5):
             results += zip([q['title'] for q in queries[max_seqs+1:]], [None]*len(queries[max_seqs+1:]))
     return OrderedDict(results)
 
-def blast_assemblies(asms_paths):
+def blast_assemblies(asms_paths, max_seqs, min_len):
     '''
     Returns BLAST hit information for a dict of assembly names and corresponding paths 
     '''
@@ -378,7 +392,7 @@ def blast_assemblies(asms_paths):
     sample_results = OrderedDict()
     for asm_name, asm_path in asms_paths.items():
         print('\tAssembly {}'.format(asm_name))
-        sample_results[asm_name] = fasta_blaster(asm_path)
+        sample_results[asm_name] = fasta_blaster(asm_path, max_seqs=5, min_len=300)
     return sample_results
 
 def blast_superkingdoms(blast_results):
@@ -418,6 +432,43 @@ def blast_summary(blast_results):
     return asms_summaries
 
 
+def plotly(asms_names, asms_stats):
+    traces = []
+    for asm in asms_names:
+        traces.append(
+            go.Scatter(
+                x=asms_stats['lens'][asm_name],
+                y=asms_stats['gc'][asm_name],
+                mode='lines+markers',
+                name=asm_name,
+                text=asms_stats['blast_summary'][asm_name],
+                marker=dict(
+                    opacity=0.5,
+                    symbol='circle',
+                    sizemode='area',
+                    sizeref=0.3,
+                    size=asms_stats['covs'][asm_name],
+                    line=dict(width=1))))
+
+    layout = go.Layout(
+        title='Assembly contig length, coverage and GC content',
+        xaxis=dict(
+            title='Contig length',
+            gridcolor='rgb(255, 255, 255)',
+            zerolinewidth=1,
+            gridwidth=2),
+        yaxis=dict(
+            title='GC content',
+            gridcolor='rgb(255, 255, 255)',
+            zerolinewidth=1,
+            gridwidth=2),
+        paper_bgcolor='rgb(243, 243, 243)',
+        plot_bgcolor='rgb(243, 243, 243)')
+
+    fig = go.Figure(data=traces, layout=layout)
+    py.plot(fig)
+
+
 def report(start_time, end_time, params):
     elapsed_time = end_time - start_time
     with open(params['out'] + '/summary.txt', 'w') as report:
@@ -427,7 +478,7 @@ def report(start_time, end_time, params):
 
 def main(
     fwd_fq=None, rev_fq=None, norm_c_list=None, norm_k_list=None, asm_k_list='21,33,55,77',
-    untrusted_contigs=False, out_dir='', threads=4):
+    untrusted_contigs=False, out_dir='', blast_max_seqs=5, blast_min_len=500, threads=4):
     
     start_time = int(time.time())
     params = {
@@ -435,20 +486,21 @@ def main(
     'out': out_dir + 'sparna_' + name_sample(fwd_fq),
     'pipe': os.path.dirname(os.path.realpath(__file__)),
     'threads': threads}
-    for dir in ['raw', 'trim', 'norm', 'asm', 'remap', 'eval']:
+    for dir in ['raw', 'trim', 'norm', 'asm', 'asm_prune', 'remap', 'eval']:
         os.makedirs(params['out'] + '/' + dir)
 
     import_reads(fwd_fq, rev_fq, params)
     trim(params)
     norm_perms = normalise(norm_c_list, norm_k_list, params)
-    asms_paths = assemble(norm_perms, asm_k_list, params)
+    asms_paths_full = assemble(norm_perms, asm_k_list, params)
+    asms_paths = prune_assemblies(asms_paths_full, blast_min_len, params)
     
     asms_names = {a: [r.id for r in SeqIO.parse(p, 'fasta')] for a, p in asms_paths.items()}
     asms_lens = {a: [int(n.split('_')[3]) for n in ns] for a, ns in asms_names.items()}
     asms_covs = map_to_assemblies(asms_paths, params)
-    blast_results = blast_assemblies(asms_paths)
+    blast_results = blast_assemblies(asms_paths, blast_max_seqs, blast_min_len)
     
-    asm_stats = {'names': asms_names,
+    asms_stats = {'names': asms_names,
                  'lens': asms_lens,
                  'covs': asms_covs,
                  'blast_summary': blast_summary(blast_results), 
@@ -457,8 +509,10 @@ def main(
                  'cpg': None}
 
 
-    print(asm_stats)
-    # pprint(blast_results)
+    # print(asms_stats)
+    # pprint.pprint(blast_results)
+
+    plotly(asms_names, asms_stats)
 
     report(start_time, time.time(), params)
 
