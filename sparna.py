@@ -139,7 +139,7 @@ def normalise(norm_c_list, norm_k_list, params):
         logger.info('Normalising norm_c={c}, norm_k={k}'.format(**cmd_vars))
     with multiprocessing.Pool(params['threads']) as pool:
         results = pool.map(run, cmds)
-    logger.info([result.stdout for result in results])
+    logger.info([result.stdout + result.stdout for result in results])
     print('\tAll done') if not max([r.returncode for r in results]) else sys.exit('ERR_NORM')
     return norm_perms
 
@@ -151,18 +151,20 @@ def assemble(norm_perms, asm_k_list, params):
     '''
     print('Assembling...')
     asm_perms = [{'k':p['k'],'c':p['c']} for p in norm_perms]
+    asm_k_list_fmt = 'k' + asm_k_list.replace(',', 'k')
     cmds_asm = []
     for asm_perm in asm_perms:
         cmd_vars = {**params,
                     'k':str(asm_perm['k']),
                     'c':str(asm_perm['c']),
-                    'asm_k_list':asm_k_list}
+                    'asm_k_list':asm_k_list,
+                    'asm_k_list_fmt':asm_k_list_fmt}
         cmd_asm = (
         'python2 /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
         '--pe1-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq '
         '--pe1-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq '
         '--s1 {out}/norm/{name}.norm_k{k}c{c}.se.fastq '
-        '-o {out}/asm/{name}.norm_k{k}c{c}.asm_k{asm_k_list} --careful'.format(**cmd_vars))
+        '-o {out}/asm/{name}.norm_k{k}c{c}.asm_{asm_k_list_fmt} --careful'.format(**cmd_vars))
         cmds_asm.append(cmd_asm)
         print('\tAssembling norm_c={c}, norm_k={k}, asm_k={asm_k_list}'.format(**cmd_vars))
     with multiprocessing.Pool(params['threads']) as pool:
@@ -174,11 +176,11 @@ def assemble(norm_perms, asm_k_list, params):
     return OrderedDict(zip(asms, asm_paths))
 
 
-def prune_assemblies(asms_paths, blast_min_len, params):
+def prune_assemblies(asms_paths, min_len, params):
     asms_paths_pruned = OrderedDict()
     for asm, path in asms_paths.items():
         asms_paths_pruned[asm] = path.replace('/asm/', '/asm_prune/')
-        records = (r for r in SeqIO.parse(path, 'fasta') if len(r.seq) >= blast_min_len)
+        records = (r for r in SeqIO.parse(path, 'fasta') if len(r.seq) >= min_len)
         os.makedirs(asms_paths_pruned[asm].replace('/contigs.fasta', ''))
         SeqIO.write(records, asms_paths_pruned[asm], 'fasta')
     return asms_paths_pruned 
@@ -411,17 +413,17 @@ def blast_superkingdoms(blast_results):
         asms_superkingdoms[asm] = asm_superkingdoms
     return asms_superkingdoms
 
-def blast_summary(blast_results):
+def blast_summary(blast_results, asms_covs):
     asms_summaries = {}
     for asm, contigs in blast_results.items():
         asm_summaries = []
-        for contig, hits in contigs.items():
+        for i, (contig, hits) in enumerate(contigs.items()):
             if hits: # Hits found
                 description = hits[0][1].description[:40] + (hits[0][1].description[40:] and '…')
                 top_hit_summary = (''
-                '{1}<br>{0}<br>Accession: {2}:{3}'
-                '<br>Identity: {4}%<br>Alignment length: {5}<br>Mismatches: {6}<br>'
-                'E-value: {12}'.format(description, *hits[0][0]))
+                'Coverage: {0} reads<br>{2}<br>{1}<br>Accession: {3}:{4}'
+                '<br>Identity: {5}%<br>Alignment length: {6}<br>Mismatches: {7}<br>'
+                'E-value: {13}'.format(asms_covs[asm][i], description, *hits[0][0]))
                 asm_summaries.append(top_hit_summary)
             elif type(hits) is list: # Zero hits
                 asm_summaries.append(False)
@@ -434,7 +436,7 @@ def blast_summary(blast_results):
 
 def plotly(asms_names, asms_stats):
     traces = []
-    for asm in asms_names:
+    for asm_name in asms_names:
         traces.append(
             go.Scatter(
                 x=asms_stats['lens'][asm_name],
@@ -442,11 +444,12 @@ def plotly(asms_names, asms_stats):
                 mode='lines+markers',
                 name=asm_name,
                 text=asms_stats['blast_summary'][asm_name],
+                line=dict(shape='spline'),
                 marker=dict(
                     opacity=0.5,
                     symbol='circle',
                     sizemode='area',
-                    sizeref=0.3,
+                    sizeref=2,
                     size=asms_stats['covs'][asm_name],
                     line=dict(width=1))))
 
@@ -456,6 +459,7 @@ def plotly(asms_names, asms_stats):
             title='Contig length',
             gridcolor='rgb(255, 255, 255)',
             zerolinewidth=1,
+            type='log',
             gridwidth=2),
         yaxis=dict(
             title='GC content',
@@ -466,7 +470,7 @@ def plotly(asms_names, asms_stats):
         plot_bgcolor='rgb(243, 243, 243)')
 
     fig = go.Figure(data=traces, layout=layout)
-    py.plot(fig)
+    print(py.plot(fig))
 
 
 def report(start_time, end_time, params):
@@ -478,7 +482,7 @@ def report(start_time, end_time, params):
 
 def main(
     fwd_fq=None, rev_fq=None, norm_c_list=None, norm_k_list=None, asm_k_list='21,33,55,77',
-    untrusted_contigs=False, out_dir='', blast_max_seqs=5, blast_min_len=500, threads=4):
+    untrusted_contigs=False, out_dir='', blast_max_seqs=5, min_len=100, threads=4):
     
     start_time = int(time.time())
     params = {
@@ -493,23 +497,23 @@ def main(
     trim(params)
     norm_perms = normalise(norm_c_list, norm_k_list, params)
     asms_paths_full = assemble(norm_perms, asm_k_list, params)
-    asms_paths = prune_assemblies(asms_paths_full, blast_min_len, params)
+    asms_paths = prune_assemblies(asms_paths_full, min_len, params)
     
     asms_names = {a: [r.id for r in SeqIO.parse(p, 'fasta')] for a, p in asms_paths.items()}
     asms_lens = {a: [int(n.split('_')[3]) for n in ns] for a, ns in asms_names.items()}
     asms_covs = map_to_assemblies(asms_paths, params)
-    blast_results = blast_assemblies(asms_paths, blast_max_seqs, blast_min_len)
+    blast_results = blast_assemblies(asms_paths, blast_max_seqs, min_len)
     
     asms_stats = {'names': asms_names,
                  'lens': asms_lens,
                  'covs': asms_covs,
-                 'blast_summary': blast_summary(blast_results), 
+                 'blast_summary': blast_summary(blast_results, asms_covs), 
                  'blast_superkingdoms': blast_superkingdoms(blast_results),
                  'gc': gc_content(asms_paths),
                  'cpg': None}
 
 
-    # print(asms_stats)
+    print(asms_stats)
     # pprint.pprint(blast_results)
 
     plotly(asms_names, asms_stats)
