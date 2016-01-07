@@ -66,6 +66,7 @@ def run(cmd):
                           stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT)
 
+
 def name_sample(fwd_fq):
     fwd_fq_prefix = os.path.splitext(os.path.split(fwd_fq)[1])[0]
     return fwd_fq_prefix
@@ -435,6 +436,9 @@ def blast_summary(blast_results, asms_covs):
 
 
 def plotly(asms_names, asms_stats):
+    cov_max = max(sum([i for i in asms_stats['covs'].values()], []))
+    cov_scale_factor = round(cov_max/5000, 1) # For bubble scaling
+
     traces = []
     for asm_name in asms_names:
         traces.append(
@@ -449,7 +453,7 @@ def plotly(asms_names, asms_stats):
                     opacity=0.5,
                     symbol='circle',
                     sizemode='area',
-                    sizeref=2,
+                    sizeref=cov_scale_factor,
                     size=asms_stats['covs'][asm_name],
                     line=dict(width=1))))
 
@@ -470,14 +474,15 @@ def plotly(asms_names, asms_stats):
         plot_bgcolor='rgb(243, 243, 243)')
 
     fig = go.Figure(data=traces, layout=layout)
-    print(py.plot(fig))
+    return py.plot(fig)
 
 
-def report(start_time, end_time, params):
+def report(chart_url, start_time, end_time, params):
     elapsed_time = end_time - start_time
+    report_content = 'wall_time\t{}\nchart_url\t{}'.format(elapsed_time, chart_url)
     with open(params['out'] + '/summary.txt', 'w') as report:
-        report.write('wall_time\t{}'.format(elapsed_time))
-        print('Wall time: {0:.{1}f}s'.format(elapsed_time, 1))
+        report.write(report_content)
+        print(report_content)
 
 
 def main(
@@ -516,9 +521,9 @@ def main(
     print(asms_stats)
     # pprint.pprint(blast_results)
 
-    plotly(asms_names, asms_stats)
+    chart_url = plotly(asms_names, asms_stats)
 
-    report(start_time, time.time(), params)
+    report(chart_url, start_time, time.time(), params)
 
 
 argh.dispatch_command(main)
