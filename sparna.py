@@ -27,7 +27,7 @@
 
 # DEPENDENCIES
 # | python packages:
-# |    argh, biopython, envoy, khmer, matplotlib
+# |    argh, biopython, khmer, plotly
 # | others, expected inside $PATH:
 # |    bwa, bowtie2, samtools, vcftools, bcftools, bedtools, seqtk, spades, quast
 # | others, bundled inside res/ directory:
@@ -161,7 +161,7 @@ def assemble(norm_perms, asm_k_list, params):
                     'asm_k_list':asm_k_list,
                     'asm_k_list_fmt':asm_k_list_fmt}
         cmd_asm = (
-        'python2 /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
+        'python /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
         '--pe1-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq '
         '--pe1-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq '
         '--s1 {out}/norm/{name}.norm_k{k}c{c}.se.fastq '
