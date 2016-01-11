@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 
 # TODO
-# | Handle no reads mapped by BWA
 # | Decide on BWA vs Bowtie2
 # | remove Python2 prefix hack from spades.py and quast.py call
-# | Top100 contigs only? --eval-n-longest-contigs 100
 # | GZIP support
 # | Fully migrate to bwa for mapping... Base reports on samtools flagsts?
 # | best_contig_len undefined
@@ -21,7 +19,6 @@
 # | increase khmer table size
 # | TESTS
 # | Which reference to use in QUAST... ref_found?
-# | Usage
 # | Determine best asm by mapping reads to all assemblies?
 # | Bootstrap/dogfoood assemblies with --trusted-contigs etc
 
@@ -458,7 +455,7 @@ def plotly(asms_names, asms_stats):
                     line=dict(width=1))))
 
     layout = go.Layout(
-        title='Assembly contig length, coverage and GC content',
+        title='Contig length vs. GC content vs. coverage',
         xaxis=dict(
             title='Contig length',
             gridcolor='rgb(255, 255, 255)',

@@ -2,9 +2,11 @@
 
 sparNA is a pipeline for assembling high depth paired-end viral sequencing reads. It is intended for use assembling highly diverse populations of viruses such as HIV and HCV.
 
-Currently under active development. Do not expect things to work smoothly just yet, but I'm happy to provide support. Feel free to get in touch via b|at|bede|dot|im or find me on [https://twitter.com/beconstant](Twitter) 
+Currently under active development. Do not expect things to work smoothly just yet, but I'm happy to help. b|at|bede|dot|im or find me on [Twitter](https://twitter.com/beconstant) 
 
-## Installing dependencies
+## Dependencies  
+Java, Python 3.5, spades, bowtie2, samtools, vcftools, bcftools, seqtk, argh, biopython, khmer, pandas, plotly  
+Trimmomatic (jar file) is bundled inside `res/`  
 
 ### Mac OS X
 Using Homebrew and pip is by far the easiest approach
