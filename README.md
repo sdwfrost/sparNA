@@ -2,7 +2,7 @@
 
 sparNA is a pipeline for assembling high depth paired-end sequencing reads from diverse viruses such as HIV and HCV. *In silico* normalisation can improve the contiguity of such assemblies, but should be parameterised on a per-sample basis for best results. sparNA accepts paired Illumina reads and lists of normalisation target coverage `c` and normalisation `k` values. Input reads are normalised in parallel using Khmer's `normalize-by-median.py` script according to each combination of `c` and `k` and each set of reads is subsequently assembled using SPAdes. BLAST results for the top n contigs in each assembly are retrieved using the EBI BLAST web service and an interactive overview of the assemblies is plotted for scrutiny by the user.
   
-[Plot example](./plot.png)  
+![Plot example](./plot.png)  
   
 Feel free to get in touch via b|at|bede|dot|im or [Twitter](https://twitter.com/beconstant) 
 
