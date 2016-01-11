@@ -25,7 +25,7 @@ Encoutering issues? Set the logging level to `INFO` for verbose output
 
 
 ```
-./sparna.py --fwd-fq /Users/Bede/Research/Datasets/phe_hcv/stop-hcv/oxford_fully_unbotched_by_me/170-264_r2_Cap1_F.fastq --rev-fq /Users/Bede/Research/Datasets/phe_hcv/stop-hcv/oxford_fully_unbotched_by_me/170-264_r2_Cap1_R.fastq --norm-c-list 1,5,20 --norm-k-list 21,31 --asm-k-list 21,33,55,77 --min-len 1000 --blast-max-seqs 5 --threads 12
+./sparna.py --fwd-fq /Users/Bede/Research/Datasets/hcv/170-264_r2_Cap1_F.fastq --rev-fq /Users/Bede/Research/Datasets/hcv/170-264_r2_Cap1_R.fastq --norm-c-list 1,5,20 --norm-k-list 21,31 --asm-k-list 21,33,55,77 --min-len 1000 --blast-max-seqs 5 --threads 12
 Importing reads...
 	Done
 Trimming...
@@ -128,6 +128,4 @@ BLASTing assemblies...
 		Query NODE_1_length_9408_cov_14.3683_ID_5067
 https://plot.ly/~bede/36
 Wall time: 354.7s
-
-
 ```

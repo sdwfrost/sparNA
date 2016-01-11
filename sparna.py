@@ -2,25 +2,12 @@
 
 # TODO
 # | Decide on BWA vs Bowtie2
-# | remove Python2 prefix hack from spades.py and quast.py call
 # | GZIP support
-# | Fully migrate to bwa for mapping... Base reports on samtools flagsts?
-# | best_contig_len undefined
-# | Send only best contigs per sample to QUAST for final eval step
-# | Write and parse and report Bowtie2 output map and remap
-# | Send coverage stats to file
 # | Report % read alignment in mapping to ref and contig
-# | More pipelining to reduce disk I/O (mainly SAMtools)
-# | Consistent use of r12 / fr
-# | Fix read remapping
 # | Interleaved reads (ONE TRUE FORMAT)
 # | add minimum similarity threshold for reference selection
 # | report on trimming, %remapped
-# | increase khmer table size
-# | TESTS
-# | Which reference to use in QUAST... ref_found?
-# | Determine best asm by mapping reads to all assemblies?
-# | Bootstrap/dogfoood assemblies with --trusted-contigs etc
+# | Bootstrap/dogfoood assemblies with --trusted-contigs etc ?
 
 # DEPENDENCIES
 # | python packages:
@@ -145,7 +132,6 @@ def normalise(norm_c_list, norm_k_list, params):
 def assemble(norm_perms, asm_k_list, params):
     '''
     Performs multiple assemblies and returns and OrderedDict of assembly names and paths
-    **PYTHON2**
     '''
     print('Assembling...')
     asm_perms = [{'k':p['k'],'c':p['c']} for p in norm_perms]
