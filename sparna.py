@@ -59,14 +59,14 @@ def name_sample(fwd_fq):
 def import_reads(fwd_fq, rev_fq, params):
     print('Importing reads...')
     cmd = (
-    'ln -s {fwd_fq} {out}/raw/{name}.f.fastq '
-    '&& ln -s {rev_fq} {out}/raw/{name}.r.fastq '
+    'cat {fwd_fq} > {out}/raw/{name}.f.fastq '
+    '&& cat {rev_fq} > {out}/raw/{name}.r.fastq '
     '&& interleave-reads.py {out}/raw/{name}.f.fastq {out}/raw/{name}.r.fastq '
     '> {out}/raw/{name}.fr.fastq'
     .format(**params, fwd_fq=fwd_fq, rev_fq=rev_fq))
     logger.info(cmd)
     cmd_run = run(cmd)
-    # logger.info(cmd_run.stdout, cmd_run.stderr)
+    logger.info(cmd_run.stdout, cmd_run.stderr)
     print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_IMPORT')
 
 
@@ -144,7 +144,7 @@ def assemble(norm_perms, asm_k_list, params):
                     'asm_k_list':asm_k_list,
                     'asm_k_list_fmt':asm_k_list_fmt}
         cmd_asm = (
-        'python /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
+        'python2 /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
         '--pe1-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq '
         '--pe1-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq '
         '--s1 {out}/norm/{name}.norm_k{k}c{c}.se.fastq '
@@ -378,7 +378,7 @@ def blast_assemblies(asms_paths, max_seqs, min_len):
     sample_results = OrderedDict()
     for asm_name, asm_path in asms_paths.items():
         print('\tAssembly {}'.format(asm_name))
-        sample_results[asm_name] = fasta_blaster(asm_path, max_seqs=5, min_len=300)
+        sample_results[asm_name] = fasta_blaster(asm_path, max_seqs, min_len=300)
     return sample_results
 
 def blast_superkingdoms(blast_results):
