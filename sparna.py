@@ -471,7 +471,7 @@ def report(chart_url, start_time, end_time, params):
 def main(
     fwd_fq=None, rev_fq=None, norm_c_list=None, norm_k_list=None, asm_k_list='21,33,55,77',
     untrusted_contigs=False, out_dir='', blast_max_seqs=5, min_len=100, threads=4):
-    
+
     start_time = int(time.time())
     params = {
     'name': name_sample(fwd_fq),

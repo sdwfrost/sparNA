@@ -7,12 +7,12 @@ sparNA is a pipeline for assembling high depth paired-end sequencing reads from 
 Feel free to get in touch via b|at|bede|dot|im or [Twitter](https://twitter.com/beconstant) 
 
 ## Dependencies  
-Tested on OS X. Should work fine on Linux
-Requires: Java, Python 3.5, SPAdes, Bowtie2, Samtools, VCFtools, BCFtools, SeqTK, Argh, Biopython, Khmer, Pandas, Plotly  
+Tested on OS X. Should work fine on Linux.  
+Requires: Java, **Python 3.5**, SPAdes, Bowtie2, Samtools, VCFtools, BCFtools, SeqTK, Argh, Biopython, Khmer, Pandas, Plotly  
 Trimmomatic (jar file) is bundled inside `res/`  
 
 ### Mac OS X
-Using Homebrew and pip is by far the easiest approach
+Using Homebrew and pip is the easiest approach
 - `brew tap homebrew/homebrew-science`
 - `brew install python3 spades bowtie2 samtools vcftools bcftools seqtk`
 - `pip3 install argh biopython khmer pandas plotly`  
@@ -20,12 +20,22 @@ Finally, sign up for a Plotly account and set your [API key](https://plot.ly/set
 - `python3 -c "import plotly; plotly.tools.set_credentials_file(username='USERNAME', api_key='API_KEY')"`  
 
 ## Usage
+Unzip `sparna.py` and the `res/` directory
+Ensure dependencies are discoverable inside $PATH
 N.B. Specify reads using absolute paths  
-Encoutering issues? Set the logging level to `INFO` for verbose output  
+Having issues? Set log level to `INFO` for verbose output  
 
 
 ```
-./sparna.py --fwd-fq /Users/Bede/Research/Datasets/hcv/170-264_r2_Cap1_F.fastq --rev-fq /Users/Bede/Research/Datasets/hcv/170-264_r2_Cap1_R.fastq --norm-c-list 1,5,20 --norm-k-list 21,31 --asm-k-list 21,33,55,77 --min-len 1000 --blast-max-seqs 5 --threads 12
+./sparna.py \
+	--fwd-fq /Users/Bede/Research/Datasets/hcv/170-264_r2_Cap1_F.fastq \
+	--rev-fq /Users/Bede/Research/Datasets/hcv/170-264_r2_Cap1_R.fastq \
+	--norm-c-list 1,5,20 \
+	--norm-k-list 21,31 \
+	--asm-k-list 21,33,55,77 \
+	--min-len 1000 \
+	--blast-max-seqs 5 \
+	--threads 12
 Importing reads...
 	Done
 Trimming...
