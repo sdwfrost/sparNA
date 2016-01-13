@@ -105,20 +105,30 @@ def normalise(norm_c_list, norm_k_list, params):
         'pipe':params['pipe'],
         'out':params['out'],
         'name':params['name']}
-        cmd = (
-        'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9 -p '
-        '{out}/trim/{name}.trim.fr_pe.fastq '
-        '-o {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq '
-        '&& normalize-by-median.py -C {c} -k {k} -N 1 -x 1e9 '
-        '{out}/trim/{name}.trim.se.fastq '
-        '-o {out}/norm/{name}.norm_k{k}c{c}.se.fastq '
-        '&& split-paired-reads.py '
-        '-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq '
-        '-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq '
-        '{out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq '
-        '&& cat {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq '
-        '{out}/norm/{name}.norm_k{k}c{c}.se.fastq > '
-        '{out}/norm/{name}.norm_k{k}c{c}.pe_and_se.fastq'.format(**cmd_vars))
+        if params['trimming']: 
+            cmd = (
+            'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9 -p'
+            ' {out}/trim/{name}.trim.fr_pe.fastq'
+            ' -o {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq'
+            ' && normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9'
+            ' {out}/trim/{name}.trim.se.fastq'
+            ' -o {out}/norm/{name}.norm_k{k}c{c}.se.fastq'
+            ' && split-paired-reads.py'
+            ' -1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq'
+            ' -2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq'
+            ' {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq'
+            ' && cat {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq'
+            ' {out}/norm/{name}.norm_k{k}c{c}.se.fastq >'
+            ' {out}/norm/{name}.norm_k{k}c{c}.pe_and_se.fastq'.format(**cmd_vars))
+        else:
+            cmd = (
+            'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9 -p'
+            ' {out}/raw/{name}.fr_pe.fastq'
+            ' -o {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq'
+            ' && split-paired-reads.py'
+            ' -1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq'
+            ' -2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq'
+            ' {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq'.format(**cmd_vars))
         cmds.append(cmd)
         print('\tNormalising norm_c={c}, norm_k={k}'.format(**cmd_vars))
         logger.info('Normalising norm_c={c}, norm_k={k}'.format(**cmd_vars))
@@ -144,11 +154,12 @@ def assemble(norm_perms, asm_k_list, params):
                     'asm_k_list':asm_k_list,
                     'asm_k_list_fmt':asm_k_list_fmt}
         cmd_asm = (
-        'python2 /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list} '
-        '--pe1-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq '
-        '--pe1-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq '
-        '--s1 {out}/norm/{name}.norm_k{k}c{c}.se.fastq '
-        '-o {out}/asm/{name}.norm_k{k}c{c}.asm_{asm_k_list_fmt} --careful'.format(**cmd_vars))
+        'python2 /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list}'
+        ' --pe1-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq'
+        ' --pe1-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq'.format(**cmd_vars))
+        if params['trimming']:
+            cmd_asm += '--s1 {out}/norm/{name}.norm_k{k}c{c}.se.fastq'.format(**cmd_vars)
+        cmd_asm += ' -o {out}/asm/{name}.norm_k{k}c{c}.asm_{asm_k_list_fmt} --careful'.format(**cmd_vars)
         cmds_asm.append(cmd_asm)
         print('\tAssembling norm_c={c}, norm_k={k}, asm_k={asm_k_list}'.format(**cmd_vars))
     with multiprocessing.Pool(params['threads']) as pool:
@@ -469,20 +480,23 @@ def report(chart_url, start_time, end_time, params):
 
 
 def main(
-    fwd_fq=None, rev_fq=None, norm_c_list=None, norm_k_list=None, asm_k_list='21,33,55,77',
-    untrusted_contigs=False, out_dir='', blast_max_seqs=5, min_len=100, threads=4):
+    fwd_fq=None, rev_fq=None, trimming=False, norm_c_list=None, norm_k_list=None,
+    asm_k_list='21,33,55,77', blast_max_seqs=5, min_len=100, out_dir='', threads=4):
 
     start_time = int(time.time())
     params = {
     'name': name_sample(fwd_fq),
     'out': out_dir + 'sparna_' + name_sample(fwd_fq),
     'pipe': os.path.dirname(os.path.realpath(__file__)),
+    'trimming': trim,
     'threads': threads}
     for dir in ['raw', 'trim', 'norm', 'asm', 'asm_prune', 'remap', 'eval']:
-        os.makedirs(params['out'] + '/' + dir)
+        if not os.path.exists(params['out'] + '/' + dir):
+            os.makedirs(params['out'] + '/' + dir)
 
     import_reads(fwd_fq, rev_fq, params)
-    trim(params)
+    if trimming:
+        trim(params)
     norm_perms = normalise(norm_c_list, norm_k_list, params)
     asms_paths_full = assemble(norm_perms, asm_k_list, params)
     asms_paths = prune_assemblies(asms_paths_full, min_len, params)
