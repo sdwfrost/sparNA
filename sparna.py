@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# Author: Bede Constantinides - b|at|bede|dot|im
+
 # TODO
 # | Decide on BWA vs Bowtie2
 # | GZIP support
@@ -23,6 +25,7 @@ import sys
 import argh
 import time
 import pandas
+import pprint
 import logging
 import requests
 import subprocess
@@ -35,8 +38,6 @@ from Bio import SeqUtils
 
 import plotly.plotly as py
 import plotly.graph_objs as go
-
-import pprint
 
 
 logging.basicConfig(level=logging.ERROR)
@@ -158,7 +159,7 @@ def assemble(norm_perms, asm_k_list, params):
         ' --pe1-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq'
         ' --pe1-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq'.format(**cmd_vars))
         if params['trimming']:
-            cmd_asm += '--s1 {out}/norm/{name}.norm_k{k}c{c}.se.fastq'.format(**cmd_vars)
+            cmd_asm += ' --s1 {out}/norm/{name}.norm_k{k}c{c}.se.fastq'.format(**cmd_vars)
         cmd_asm += ' -o {out}/asm/{name}.norm_k{k}c{c}.asm_{asm_k_list_fmt} --careful'.format(**cmd_vars)
         cmds_asm.append(cmd_asm)
         print('\tAssembling norm_c={c}, norm_k={k}, asm_k={asm_k_list}'.format(**cmd_vars))
@@ -238,7 +239,7 @@ def map_to_assemblies(asms_paths, params):
     return asms_coverages
 
 
-def build_ebi_blast_query(title, sequence):
+def build_ebi_blast_query(title, sequence, database):
     '''
     Returns dict of REST params for the EBI BLAST API
     '''
@@ -246,7 +247,7 @@ def build_ebi_blast_query(title, sequence):
     return { 'email': 'bede.constantinides@manchester.ac.uk',
              'program': 'blastn',
              'stype': 'dna',
-             'database': 'em_rel_vrl',
+             'database': database,
              'align': 6,
              'match_scores': '1,-3',
              'gapopen': 5, 
@@ -302,7 +303,7 @@ def ebi_blast(query):
             logger.info(status.text + ' ' + call.text)
             logger.info('Job completed in ' + str(time.time() - start_time))
             break
-        elif time.time() - start_time > 120:
+        elif time.time() - start_time > 180:
             print('blast timeout')
             logger.error('blast timeout')
             break
@@ -336,23 +337,24 @@ def ebi_annotated_blast(query):
             annotations = list(fetch_annotation(hit[1], hit[2]) for hit in hits)
             hits_annotations = list(zip(hits, annotations))
             # hits_annotations = list(zip(hits)) TESTING WITHOUT SEQRECORD
-            logger.info(status.text + ' ' + call.text)
             print('\t\tQuery ' + query['title'])
+            logger.info(status.text + ' ' + call.text)
             # print(time.time() - start_time)
             break
-        elif time.time() - start_time > 120:
-            print('blast timeout')
+        elif time.time() - start_time > 180:
             logger.error('blast timeout')
+            hits_annotations = None
             break
         elif status.text == 'RUNNING':
-            time.sleep(2)
+            time.sleep(10)
+            print('.', end='')
         else:
-            print('status: ' + status.text)
             logger.error('status: ' + status.text)
+            hits_annotations = None
             break
     return (query['title'], hits_annotations)
 
-def fasta_blaster(fasta, max_seqs, min_len):
+def fasta_blaster(fasta, database, max_seqs, min_len):
     '''
     NEEDS UPDATING FOR NESTED ORDEREDDICTS
     MIN_LEN NEEDS IMPLEMENTING
@@ -374,22 +376,22 @@ def fasta_blaster(fasta, max_seqs, min_len):
             if len(record.seq) >= min_len:
                 records[record.id] = record.seq
 
-    queries = [build_ebi_blast_query(title, seq) for title, seq in records.items()]
+    queries = [build_ebi_blast_query(title, seq, database) for title, seq in records.items()]
     with multiprocessing.Pool(30) as pool:
         results = pool.map(ebi_annotated_blast, queries[0:max_seqs+1])
         if len(queries) > max_seqs:
             results += zip([q['title'] for q in queries[max_seqs+1:]], [None]*len(queries[max_seqs+1:]))
     return OrderedDict(results)
 
-def blast_assemblies(asms_paths, max_seqs, min_len):
+def blast_assemblies(asms_paths, database, max_seqs, min_len):
     '''
     Returns BLAST hit information for a dict of assembly names and corresponding paths 
     '''
     print('BLASTing assemblies...')
     sample_results = OrderedDict()
     for asm_name, asm_path in asms_paths.items():
-        print('\tAssembly {}'.format(asm_name))
-        sample_results[asm_name] = fasta_blaster(asm_path, max_seqs, min_len=300)
+        print('\n\tAssembly {}'.format(asm_name))
+        sample_results[asm_name] = fasta_blaster(asm_path, database, max_seqs, min_len)
     return sample_results
 
 def blast_superkingdoms(blast_results):
@@ -429,27 +431,43 @@ def blast_summary(blast_results, asms_covs):
     return asms_summaries
 
 
-def plotly(asms_names, asms_stats):
+def plotly(asms_names, asms_stats, blast):
     cov_max = max(sum([i for i in asms_stats['covs'].values()], []))
     cov_scale_factor = round(cov_max/5000, 1) # For bubble scaling
 
     traces = []
     for asm_name in asms_names:
-        traces.append(
-            go.Scatter(
-                x=asms_stats['lens'][asm_name],
-                y=asms_stats['gc'][asm_name],
-                mode='lines+markers',
-                name=asm_name,
-                text=asms_stats['blast_summary'][asm_name],
-                line=dict(shape='spline'),
-                marker=dict(
-                    opacity=0.5,
-                    symbol='circle',
-                    sizemode='area',
-                    sizeref=cov_scale_factor,
-                    size=asms_stats['covs'][asm_name],
-                    line=dict(width=1))))
+        if blast:
+            traces.append(
+                go.Scatter(
+                    x=asms_stats['lens'][asm_name],
+                    y=asms_stats['gc'][asm_name],
+                    mode='lines+markers',
+                    name=asm_name,
+                    text=asms_stats['blast_summary'][asm_name],
+                    line=dict(shape='spline'),
+                    marker=dict(
+                        opacity=0.5,
+                        symbol='circle',
+                        sizemode='area',
+                        sizeref=cov_scale_factor,
+                        size=asms_stats['covs'][asm_name],
+                        line=dict(width=1))))
+        else:
+            traces.append(
+                go.Scatter(
+                    x=asms_stats['lens'][asm_name],
+                    y=asms_stats['gc'][asm_name],
+                    mode='lines+markers',
+                    name=asm_name,
+                    line=dict(shape='spline'),
+                    marker=dict(
+                        opacity=0.5,
+                        symbol='circle',
+                        sizemode='area',
+                        sizeref=cov_scale_factor,
+                        size=asms_stats['covs'][asm_name],
+                        line=dict(width=1))))
 
     layout = go.Layout(
         title='Contig length vs. GC content vs. coverage',
@@ -471,25 +489,32 @@ def plotly(asms_names, asms_stats):
     return py.plot(fig)
 
 
-def report(chart_url, start_time, end_time, params):
+def report(asms_stats, chart_url, start_time, end_time, params):
     elapsed_time = end_time - start_time
     report_content = 'wall_time\t{}\nchart_url\t{}'.format(elapsed_time, chart_url)
+    report_content += '\n\nasms_stats = ' + pprint.pprint(asms_stats)
     with open(params['out'] + '/summary.txt', 'w') as report:
         report.write(report_content)
         print(report_content)
 
 
 def main(
-    fwd_fq=None, rev_fq=None, trimming=False, norm_c_list=None, norm_k_list=None,
-    asm_k_list='21,33,55,77', blast_max_seqs=5, min_len=100, out_dir='', threads=4):
+    fwd_fq=None, rev_fq=None,
+    trimming=False,
+    blast=False,
+    norm_c_list=None, norm_k_list=None,
+    asm_k_list='21,33,55,77',
+    blast_db='em_rel', blast_max_seqs=5, min_len=100,
+    out_dir='', threads=4):
 
     start_time = int(time.time())
-    params = {
-    'name': name_sample(fwd_fq),
-    'out': out_dir + 'sparna_' + name_sample(fwd_fq),
-    'pipe': os.path.dirname(os.path.realpath(__file__)),
-    'trimming': trim,
-    'threads': threads}
+    
+    params = dict(name=name_sample(fwd_fq),
+                  out=out_dir + 'sparna_' + name_sample(fwd_fq),
+                  pipe=os.path.dirname(os.path.realpath(__file__)),
+                  trimming=trim,
+                  threads=threads)
+
     for dir in ['raw', 'trim', 'norm', 'asm', 'asm_prune', 'remap', 'eval']:
         if not os.path.exists(params['out'] + '/' + dir):
             os.makedirs(params['out'] + '/' + dir)
@@ -504,23 +529,26 @@ def main(
     asms_names = {a: [r.id for r in SeqIO.parse(p, 'fasta')] for a, p in asms_paths.items()}
     asms_lens = {a: [int(n.split('_')[3]) for n in ns] for a, ns in asms_names.items()}
     asms_covs = map_to_assemblies(asms_paths, params)
-    blast_results = blast_assemblies(asms_paths, blast_max_seqs, min_len)
     
-    asms_stats = {'names': asms_names,
-                 'lens': asms_lens,
-                 'covs': asms_covs,
-                 'blast_summary': blast_summary(blast_results, asms_covs), 
-                 'blast_superkingdoms': blast_superkingdoms(blast_results),
-                 'gc': gc_content(asms_paths),
-                 'cpg': None}
+    if blast:
+        blast_results = blast_assemblies(asms_paths, blast_db, blast_max_seqs, min_len)
+        asms_stats = dict(names=asms_names,
+                          lens=asms_lens,
+                          covs=asms_covs,
+                          blast_summary=blast_summary(blast_results, asms_covs), 
+                          blast_superkingdoms=blast_superkingdoms(blast_results),
+                          gc=gc_content(asms_paths),
+                          cpg=None)
+    else:
+        asms_stats = dict(names=asms_names,
+                          lens=asms_lens,
+                          covs=asms_covs,
+                          gc=gc_content(asms_paths),
+                          cpg=None)
 
+    chart_url = plotly(asms_names, asms_stats, blast)
 
-    print(asms_stats)
-    # pprint.pprint(blast_results)
-
-    chart_url = plotly(asms_names, asms_stats)
-
-    report(chart_url, start_time, time.time(), params)
+    report(asms_stats, chart_url, start_time, time.time(), params)
 
 
 argh.dispatch_command(main)

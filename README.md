@@ -1,6 +1,6 @@
 # sparNA  
 
-sparNA is a pipeline for assembling high depth paired-end sequencing reads from diverse viruses such as HIV and HCV. *In silico* normalisation can improve the contiguity of such assemblies, but should be parameterised on a per-sample basis for best results. sparNA accepts paired Illumina reads and lists of normalisation target coverage `c` and normalisation `k` values. Input reads are optionally trimmed and normalised in parallel using Khmer's `normalize-by-median.py` according to each combination of `c` and `k`, and each set of reads is subsequently assembled with SPAdes. BLAST results for the top n contigs in each assembly are retrieved using the EBI BLAST web service and an interactive plot of the assemblies is generated for scrutiny by the user.
+sparNA is a pipeline for assembling high depth paired-end sequencing reads from diverse viruses such as HIV and HCV. *In silico* normalisation can improve the contiguity of such assemblies, but should be parameterised on a per-sample basis for best results. sparNA accepts paired Illumina reads and lists of normalisation target coverage `c` and normalisation `k` values. Input reads are optionally trimmed and normalised in parallel using Khmer's `normalize-by-median.py` according to each combination of `c` and `k`, and each set of reads is subsequently assembled with SPAdes. BLAST results for the top n contigs in each assembly are retrieved using the EBI BLAST web service and an interactive plot of the assemblies is generated for scrutiny by the user. The default BLAST db is the complete EBI sequence release `em_rel`, but for faster searches, the smaller viral `em_rel_vrl` db may be used.  
   
 ![Plot example](./plot.png)  
   
@@ -21,16 +21,15 @@ Finally, sign up for a Plotly account and set your [API key](https://plot.ly/set
 
 ## Usage
 Unzip `sparna.py` and the `res/` directory
-Ensure dependencies are discoverable inside $PATH
+Ensure dependencies are discoverable inside $PATH  
 N.B. Specify reads using absolute paths  
 Having issues? Set log level to `INFO` for verbose output  
 
 
 ```
-./sparna.py \
-	--fwd-fq /Users/Bede/Research/Datasets/hcv/170-264_r2_Cap1_F.fastq \
-	--rev-fq /Users/Bede/Research/Datasets/hcv/170-264_r2_Cap1_R.fastq \
-	--trimming \
+./sparna.py --trimming --blast
+	--fwd-fq /Users/Bede/Datasets/hcv/170-264_r2_Cap1_F.fastq \
+	--rev-fq /Users/Bede/Datasets/hcv/170-264_r2_Cap1_R.fastq \
 	--norm-c-list 1,5,20 \
 	--norm-k-list 21,31 \
 	--asm-k-list 21,33,55,77 \
