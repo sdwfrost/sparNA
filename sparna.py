@@ -77,15 +77,15 @@ def trim(params):
     'java -jar {pipe}/res/trimmomatic-0.33.jar PE '
     '{out}/raw/{name}.f.fastq '
     '{out}/raw/{name}.r.fastq '
-    '{out}/trim/{name}.trim.f_pe.fastq '
-    '{out}/trim/{name}.trim.f_se.fastq '
-    '{out}/trim/{name}.trim.r_pe.fastq '
-    '{out}/trim/{name}.trim.r_se.fastq '
+    '{out}/trim/{name}.f.fastq '
+    '{out}/trim/{name}.f.fastq '
+    '{out}/trim/{name}.r.fastq '
+    '{out}/trim/{name}.r.fastq '
     'ILLUMINACLIP:{pipe}/res/illumina_adapters.fa:2:30:10 MINLEN:30 '
-    '&& cat {out}/trim/{name}.trim.f_se.fastq {out}/trim/{name}.trim.r_se.fastq '
-    '> {out}/trim/{name}.trim.se.fastq '
-    '&& interleave-reads.py {out}/trim/{name}.trim.f_pe.fastq {out}/trim/{name}.trim.r_pe.fastq '
-    '> {out}/trim/{name}.trim.fr_pe.fastq'
+    '&& cat {out}/trim/{name}.f_se.fastq {out}/trim/{name}.r_se.fastq '
+    '> {out}/trim/{name}.se.fastq '
+    '&& interleave-reads.py {out}/trim/{name}.f_pe.fastq {out}/trim/{name}.r_pe.fastq '
+    '> {out}/trim/{name}.fr.fastq'
     .format(**params))
     logger.info(cmd)
     cmd_run = run(cmd)
@@ -109,27 +109,27 @@ def normalise(norm_c_list, norm_k_list, params):
         if params['trimming']: 
             cmd = (
             'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9 -p'
-            ' {out}/trim/{name}.trim.fr_pe.fastq'
-            ' -o {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq'
+            ' {out}/trim/{name}.fr.fastq'
+            ' -o {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'
             ' && normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9'
-            ' {out}/trim/{name}.trim.se.fastq'
+            ' {out}/trim/{name}.se.fastq'
             ' -o {out}/norm/{name}.norm_k{k}c{c}.se.fastq'
             ' && split-paired-reads.py'
             ' -1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq'
             ' -2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq'
-            ' {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq'
-            ' && cat {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq'
+            ' {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'
+            ' && cat {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'
             ' {out}/norm/{name}.norm_k{k}c{c}.se.fastq >'
             ' {out}/norm/{name}.norm_k{k}c{c}.pe_and_se.fastq'.format(**cmd_vars))
         else:
             cmd = (
             'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9 -p'
-            ' {out}/raw/{name}.fr_pe.fastq'
-            ' -o {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq'
+            ' {out}/raw/{name}.fr.fastq'
+            ' -o {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'
             ' && split-paired-reads.py'
             ' -1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq'
             ' -2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq'
-            ' {out}/norm/{name}.norm_k{k}c{c}.fr_pe.fastq'.format(**cmd_vars))
+            ' {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'.format(**cmd_vars))
         cmds.append(cmd)
         print('\tNormalising norm_c={c}, norm_k={k}'.format(**cmd_vars))
         logger.info('Normalising norm_c={c}, norm_k={k}'.format(**cmd_vars))
@@ -155,9 +155,11 @@ def assemble(norm_perms, asm_k_list, params):
                     'asm_k_list':asm_k_list,
                     'asm_k_list_fmt':asm_k_list_fmt}
         cmd_asm = (
-        'python2 /usr/local/bin/spades.py -m 8 -t {threads} -k {asm_k_list}'
+        'spades.py -m 8 -t {threads}'
         ' --pe1-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq'
         ' --pe1-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq'.format(**cmd_vars))
+        if asm_k_list:
+        	cmd_asm += ' -k {asm_k_list}'.format(**cmd_vars)
         if params['trimming']:
             cmd_asm += ' --s1 {out}/norm/{name}.norm_k{k}c{c}.se.fastq'.format(**cmd_vars)
         cmd_asm += ' -o {out}/asm/{name}.norm_k{k}c{c}.asm_{asm_k_list_fmt} --careful'.format(**cmd_vars)
@@ -489,10 +491,9 @@ def plotly(asms_names, asms_stats, blast):
     return py.plot(fig)
 
 
-def report(asms_stats, chart_url, start_time, end_time, params):
+def report(chart_url, start_time, end_time, params):
     elapsed_time = end_time - start_time
     report_content = 'wall_time\t{}\nchart_url\t{}'.format(elapsed_time, chart_url)
-    report_content += '\n\nasms_stats = ' + pprint.pprint(asms_stats)
     with open(params['out'] + '/summary.txt', 'w') as report:
         report.write(report_content)
         print(report_content)
@@ -503,8 +504,8 @@ def main(
     trimming=False,
     blast=False,
     norm_c_list=None, norm_k_list=None,
-    asm_k_list='21,33,55,77',
-    blast_db='em_rel', blast_max_seqs=5, min_len=100,
+    asm_k_list='',
+    blast_db='em_rel', blast_max_seqs=5, min_len=500,
     out_dir='', threads=4):
 
     start_time = int(time.time())
@@ -512,7 +513,7 @@ def main(
     params = dict(name=name_sample(fwd_fq),
                   out=out_dir + 'sparna_' + name_sample(fwd_fq),
                   pipe=os.path.dirname(os.path.realpath(__file__)),
-                  trimming=trim,
+                  trimming=trimming,
                   threads=threads)
 
     for dir in ['raw', 'trim', 'norm', 'asm', 'asm_prune', 'remap', 'eval']:
@@ -548,7 +549,10 @@ def main(
 
     chart_url = plotly(asms_names, asms_stats, blast)
 
-    report(asms_stats, chart_url, start_time, time.time(), params)
+    report(chart_url, start_time, time.time(), params)
+
+    print('asms_stats = ', end='')
+    print(asms_stats)
 
 
 argh.dispatch_command(main)
