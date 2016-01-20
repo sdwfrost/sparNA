@@ -40,7 +40,7 @@ import plotly.plotly as py
 import plotly.graph_objs as go
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 
@@ -504,12 +504,12 @@ def main(
     norm_c_list=None, norm_k_list=None,
     asm_k_list='',
     blast_db='em_rel', blast_max_seqs=5, min_len=500,
-    out_dir='sparna', threads=4):
+    out_prefix='sparna', threads=4):
 
     start_time = int(time.time())
     
     params = dict(name=name_sample(fwd_fq),
-                  out=out_dir + '_' + name_sample(fwd_fq),
+                  out=out_prefix + '_' + name_sample(fwd_fq),
                   pipe=os.path.dirname(os.path.realpath(__file__)),
                   qual_trim=qual_trim,
                   threads=threads)
