@@ -71,7 +71,7 @@ def import_reads(fwd_fq, rev_fq, params):
     print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_IMPORT')
 
 
-def trim(trimming, norm_k_list, params):
+def trim(norm_k_list, params):
     print('Trimming...')
     # Fetch smallest norm_k for trimming with Trimmomatic min_len - Screed bug workaround
     params['min_len'] = max(map(int, norm_k_list.split(',')))
@@ -82,18 +82,17 @@ def trim(trimming, norm_k_list, params):
     ' {out}/trim/{name}.f_pe.fastq'
     ' {out}/trim/{name}.f_se.fastq'
     ' {out}/trim/{name}.r_pe.fastq'
-    ' {out}/trim/{name}.r_se.fastq'.format(**params))
-    if trimming:
-    	cmd += (
-    	' ILLUMINACLIP:{pipe}/res/illumina_adapters.fa:2:30:10'
-    	' MINLEN:{min_len}'.format(**params))
-    else:
-    	 cmd += (
-    	 ' MINLEN:{min_len}'.format(**params))
+    ' {out}/trim/{name}.r_se.fastq'
+	' ILLUMINACLIP:{pipe}/res/illumina_adapters.fa:2:30:10'.format(**params))
+    if params['qual_trim']:
+    	print('\tQuality trimming...')
+    	logger.info('Quality trimming...')
+    	cmd += ' SLIDINGWINDOW:4:20'.format(**params)
     cmd += (
-    ' && cat {out}/trim/{name}.f_se.fastq {out}/trim/{name}.r_se.fastq '
-    ' > {out}/trim/{name}.se.fastq '
-    ' && interleave-reads.py {out}/trim/{name}.f_pe.fastq {out}/trim/{name}.r_pe.fastq '
+    ' MINLEN:{min_len}'
+    ' && cat {out}/trim/{name}.f_se.fastq {out}/trim/{name}.r_se.fastq'
+    ' > {out}/trim/{name}.se.fastq'
+    ' && interleave-reads.py {out}/trim/{name}.f_pe.fastq {out}/trim/{name}.r_pe.fastq'
     ' > {out}/trim/{name}.fr.fastq'.format(**params))
     logger.info(cmd)
     cmd_run = run(cmd)
@@ -120,7 +119,7 @@ def normalise(norm_c_list, norm_k_list, params):
         ' -o {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'
         ' && normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9'
         ' {out}/trim/{name}.se.fastq'
-        ' -o {out}/norm/{name}.norm_k{k}c{c}.se.fastq --force'
+        ' -o {out}/norm/{name}.norm_k{k}c{c}.se.fastq'
         ' && split-paired-reads.py'
         ' -1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq'
         ' -2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq'
@@ -147,20 +146,20 @@ def assemble(norm_perms, asm_k_list, params):
     asm_k_list_fmt = 'k' + asm_k_list.replace(',', 'k')
     cmds_asm = []
     for asm_perm in asm_perms:
-        cmd_vars = {**params,
-                    'k':str(asm_perm['k']),
-                    'c':str(asm_perm['c']),
-                    'asm_k_list':asm_k_list,
-                    'asm_k_list_fmt':asm_k_list_fmt}
+        cmd_vars = dict(**params,
+                    	k=str(asm_perm['k']),
+                    	c=str(asm_perm['c']),
+                    	asm_k_list=asm_k_list,
+                    	asm_k_list_fmt=asm_k_list_fmt)
         cmd_asm = (
         'spades.py -m 8 -t {threads}'
         ' --pe1-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq'
         ' --pe1-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq'.format(**cmd_vars))
         if asm_k_list:
         	cmd_asm += ' -k {asm_k_list}'.format(**cmd_vars)
-        if params['trimming']:
-            cmd_asm += ' --s1 {out}/norm/{name}.norm_k{k}c{c}.se.fastq'.format(**cmd_vars)
-        cmd_asm += ' -o {out}/asm/{name}.norm_k{k}c{c}.asm_{asm_k_list_fmt} --careful'.format(**cmd_vars)
+        cmd_asm += (
+        ' --s1 {out}/norm/{name}.norm_k{k}c{c}.se.fastq'
+        ' -o {out}/asm/{name}.norm_k{k}c{c}.asm_{asm_k_list_fmt} --careful'.format(**cmd_vars))
         cmds_asm.append(cmd_asm)
         print('\tAssembling norm_c={c}, norm_k={k}, asm_k={asm_k_list}'.format(**cmd_vars))
     with multiprocessing.Pool(params['threads']) as pool:
@@ -500,19 +499,19 @@ def report(chart_url, start_time, end_time, params):
 
 def main(
     fwd_fq=None, rev_fq=None,
-    trimming=False,
+    qual_trim=False,
     blast=False,
     norm_c_list=None, norm_k_list=None,
     asm_k_list='',
     blast_db='em_rel', blast_max_seqs=5, min_len=500,
-    out_dir='', threads=4):
+    out_dir='sparna', threads=4):
 
     start_time = int(time.time())
     
     params = dict(name=name_sample(fwd_fq),
-                  out=out_dir + 'sparna_' + name_sample(fwd_fq),
+                  out=out_dir + '_' + name_sample(fwd_fq),
                   pipe=os.path.dirname(os.path.realpath(__file__)),
-                  trimming=trimming,
+                  qual_trim=qual_trim,
                   threads=threads)
 
     for dir in ['raw', 'trim', 'norm', 'asm', 'asm_prune', 'remap', 'eval']:
@@ -520,7 +519,7 @@ def main(
             os.makedirs(params['out'] + '/' + dir)
 
     import_reads(fwd_fq, rev_fq, params)
-    trim(trimming, norm_k_list, params)
+    trim(norm_k_list, params)
     norm_perms = normalise(norm_c_list, norm_k_list, params)
     asms_paths_full = assemble(norm_perms, asm_k_list, params)
     asms_paths = prune_assemblies(asms_paths_full, min_len, params)
