@@ -162,6 +162,13 @@ def assemble(norm_perms, asm_k_list, params):
         ' -o {out}/asm/{name}.norm_k{k}c{c}.asm_{asm_k_list_fmt} --careful'.format(**cmd_vars))
         cmds_asm.append(cmd_asm)
         print('\tAssembling norm_c={c}, norm_k={k}, asm_k={asm_k_list}'.format(**cmd_vars))
+    if params['asm_without_norm']:
+    	cmd_asm = (
+    	'spades.py -m 8 -t 12'
+    	' --12 {out}/trim/{name}.fr.fastq'
+    	' -s {out}/trim/{name}.se.fastq'
+    	' -o {out}/asm/{name}.no_norm.asm_{asm_k_list_fmt} --careful'.format(**cmd_vars))
+    	cmds_asm.append(cmd_asm)
     with multiprocessing.Pool(params['threads']) as pool:
         results = pool.map(run, cmds_asm)
     logger.info([result.stdout for result in results])
@@ -502,7 +509,7 @@ def main(
     qual_trim=False,
     blast=False,
     norm_c_list=None, norm_k_list=None,
-    asm_k_list='',
+    asm_k_list='', asm_without_norm=False,
     blast_db='em_rel', blast_max_seqs=5, min_len=500,
     out_prefix='sparna', threads=4):
 
@@ -512,6 +519,7 @@ def main(
                   out=out_prefix + '_' + name_sample(fwd_fq),
                   pipe=os.path.dirname(os.path.realpath(__file__)),
                   qual_trim=qual_trim,
+                  asm_without_norm=asm_without_norm,
                   threads=threads)
 
     for dir in ['raw', 'trim', 'norm', 'asm', 'asm_prune', 'remap', 'eval']:
