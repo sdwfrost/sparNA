@@ -71,21 +71,25 @@ def import_reads(fwd_fq, rev_fq, params):
     print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_IMPORT')
 
 
-def trim(params):
+def trim(trimming, params):
     print('Trimming...')
     cmd = (
-    'java -jar {pipe}/res/trimmomatic-0.33.jar PE '
-    '{out}/raw/{name}.f.fastq '
-    '{out}/raw/{name}.r.fastq '
-    '{out}/trim/{name}.f.fastq '
-    '{out}/trim/{name}.f.fastq '
-    '{out}/trim/{name}.r.fastq '
-    '{out}/trim/{name}.r.fastq '
-    'ILLUMINACLIP:{pipe}/res/illumina_adapters.fa:2:30:10 MINLEN:30 '
-    '&& cat {out}/trim/{name}.f_se.fastq {out}/trim/{name}.r_se.fastq '
-    '> {out}/trim/{name}.se.fastq '
-    '&& interleave-reads.py {out}/trim/{name}.f_pe.fastq {out}/trim/{name}.r_pe.fastq '
-    '> {out}/trim/{name}.fr.fastq'
+    'java -jar {pipe}/res/trimmomatic-0.33.jar PE'
+    ' {out}/raw/{name}.f.fastq'
+    ' {out}/raw/{name}.r.fastq'
+    ' {out}/trim/{name}.f_pe.fastq'
+    ' {out}/trim/{name}.f_se.fastq'
+    ' {out}/trim/{name}.r_pe.fastq'
+    ' {out}/trim/{name}.r_se.fastq'
+    .format(**params))
+    if trimming:
+    	cmd +=' ILLUMINACLIP:{pipe}/res/illumina_adapters.fa:2:30:10 MINLEN:30'.format(**params)
+    else:
+    	 cmd += (' MINLEN:30'
+    ' && cat {out}/trim/{name}.f_se.fastq {out}/trim/{name}.r_se.fastq '
+    ' > {out}/trim/{name}.se.fastq '
+    ' && interleave-reads.py {out}/trim/{name}.f_pe.fastq {out}/trim/{name}.r_pe.fastq '
+    ' > {out}/trim/{name}.fr.fastq'
     .format(**params))
     logger.info(cmd)
     cmd_run = run(cmd)
@@ -106,32 +110,23 @@ def normalise(norm_c_list, norm_k_list, params):
         'pipe':params['pipe'],
         'out':params['out'],
         'name':params['name']}
-        if params['trimming']: 
-            cmd = (
-            'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9 -p'
-            ' {out}/trim/{name}.fr.fastq'
-            ' -o {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'
-            ' && normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9'
-            ' {out}/trim/{name}.se.fastq'
-            ' -o {out}/norm/{name}.norm_k{k}c{c}.se.fastq'
-            ' && split-paired-reads.py'
-            ' -1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq'
-            ' -2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq'
-            ' {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'
-            ' && cat {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'
-            ' {out}/norm/{name}.norm_k{k}c{c}.se.fastq >'
-            ' {out}/norm/{name}.norm_k{k}c{c}.pe_and_se.fastq'.format(**cmd_vars))
-        else:
-            cmd = (
-            'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9 -p'
-            ' {out}/raw/{name}.fr.fastq'
-            ' -o {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'
-            ' && split-paired-reads.py'
-            ' -1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq'
-            ' -2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq'
-            ' {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'.format(**cmd_vars))
+        cmd = (
+        'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9 -p'
+        ' {out}/trim/{name}.fr.fastq'
+        ' -o {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'
+        ' && normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9'
+        ' {out}/trim/{name}.se.fastq'
+        ' -o {out}/norm/{name}.norm_k{k}c{c}.se.fastq --force'
+        ' && split-paired-reads.py'
+        ' -1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq'
+        ' -2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq'
+        ' {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'
+        ' && cat {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'
+        ' {out}/norm/{name}.norm_k{k}c{c}.se.fastq >'
+        ' {out}/norm/{name}.norm_k{k}c{c}.pe_and_se.fastq'.format(**cmd_vars))
         cmds.append(cmd)
         print('\tNormalising norm_c={c}, norm_k={k}'.format(**cmd_vars))
+        print(cmd)
         logger.info('Normalising norm_c={c}, norm_k={k}'.format(**cmd_vars))
     with multiprocessing.Pool(params['threads']) as pool:
         results = pool.map(run, cmds)
@@ -462,6 +457,7 @@ def plotly(asms_names, asms_stats, blast):
                     y=asms_stats['gc'][asm_name],
                     mode='lines+markers',
                     name=asm_name,
+                    text=asms_stats['names'][asm_name],
                     line=dict(shape='spline'),
                     marker=dict(
                         opacity=0.5,
@@ -521,8 +517,7 @@ def main(
             os.makedirs(params['out'] + '/' + dir)
 
     import_reads(fwd_fq, rev_fq, params)
-    if trimming:
-        trim(params)
+    trim(trimming, params)
     norm_perms = normalise(norm_c_list, norm_k_list, params)
     asms_paths_full = assemble(norm_perms, asm_k_list, params)
     asms_paths = prune_assemblies(asms_paths_full, min_len, params)
@@ -551,8 +546,8 @@ def main(
 
     report(chart_url, start_time, time.time(), params)
 
-    print('asms_stats = ', end='')
-    print(asms_stats)
+    # print('asms_stats = ', end='')
+    # print(asms_stats)
 
 
 argh.dispatch_command(main)
