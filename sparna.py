@@ -40,7 +40,7 @@ import plotly.plotly as py
 import plotly.graph_objs as go
 
 
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -71,8 +71,10 @@ def import_reads(fwd_fq, rev_fq, params):
     print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_IMPORT')
 
 
-def trim(trimming, params):
+def trim(trimming, norm_k_list, params):
     print('Trimming...')
+    # Fetch smallest norm_k for trimming with Trimmomatic min_len - Screed bug workaround
+    params['min_len'] = max(map(int, norm_k_list.split(',')))
     cmd = (
     'java -jar {pipe}/res/trimmomatic-0.33.jar PE'
     ' {out}/raw/{name}.f.fastq'
@@ -80,17 +82,19 @@ def trim(trimming, params):
     ' {out}/trim/{name}.f_pe.fastq'
     ' {out}/trim/{name}.f_se.fastq'
     ' {out}/trim/{name}.r_pe.fastq'
-    ' {out}/trim/{name}.r_se.fastq'
-    .format(**params))
+    ' {out}/trim/{name}.r_se.fastq'.format(**params))
     if trimming:
-    	cmd +=' ILLUMINACLIP:{pipe}/res/illumina_adapters.fa:2:30:10 MINLEN:30'.format(**params)
+    	cmd += (
+    	' ILLUMINACLIP:{pipe}/res/illumina_adapters.fa:2:30:10'
+    	' MINLEN:{min_len}'.format(**params))
     else:
-    	 cmd += (' MINLEN:30'
+    	 cmd += (
+    	 ' MINLEN:{min_len}'.format(**params))
+    cmd += (
     ' && cat {out}/trim/{name}.f_se.fastq {out}/trim/{name}.r_se.fastq '
     ' > {out}/trim/{name}.se.fastq '
     ' && interleave-reads.py {out}/trim/{name}.f_pe.fastq {out}/trim/{name}.r_pe.fastq '
-    ' > {out}/trim/{name}.fr.fastq'
-    .format(**params))
+    ' > {out}/trim/{name}.fr.fastq'.format(**params))
     logger.info(cmd)
     cmd_run = run(cmd)
     logger.info(cmd_run.stderr)
@@ -126,7 +130,6 @@ def normalise(norm_c_list, norm_k_list, params):
         ' {out}/norm/{name}.norm_k{k}c{c}.pe_and_se.fastq'.format(**cmd_vars))
         cmds.append(cmd)
         print('\tNormalising norm_c={c}, norm_k={k}'.format(**cmd_vars))
-        print(cmd)
         logger.info('Normalising norm_c={c}, norm_k={k}'.format(**cmd_vars))
     with multiprocessing.Pool(params['threads']) as pool:
         results = pool.map(run, cmds)
@@ -517,7 +520,7 @@ def main(
             os.makedirs(params['out'] + '/' + dir)
 
     import_reads(fwd_fq, rev_fq, params)
-    trim(trimming, params)
+    trim(trimming, norm_k_list, params)
     norm_perms = normalise(norm_c_list, norm_k_list, params)
     asms_paths_full = assemble(norm_perms, asm_k_list, params)
     asms_paths = prune_assemblies(asms_paths_full, min_len, params)
