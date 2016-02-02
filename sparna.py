@@ -40,7 +40,7 @@ import plotly.plotly as py
 import plotly.graph_objs as go
 
 
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -74,7 +74,7 @@ def import_reads(fwd_fq, rev_fq, params):
 def trim(norm_k_list, params):
     print('Trimming...')
     # Fetch smallest norm_k for trimming with Trimmomatic min_len - Screed bug workaround
-    params['min_len'] = max(map(int, norm_k_list.split(','))) if norm_k_list else 0
+    params['min_len'] = max(map(int, norm_k_list.split(','))) if not params['no_norm'] else 0
     cmd = (
     'java -jar {pipe}/res/trimmomatic-0.33.jar PE'
     ' {out}/raw/{name}.f.fastq'
@@ -83,11 +83,11 @@ def trim(norm_k_list, params):
     ' {out}/trim/{name}.f_se.fastq'
     ' {out}/trim/{name}.r_pe.fastq'
     ' {out}/trim/{name}.r_se.fastq'
-	' ILLUMINACLIP:{pipe}/res/illumina_adapters.fa:2:30:10'.format(**params))
+    ' ILLUMINACLIP:{pipe}/res/illumina_adapters.fa:2:30:10'.format(**params))
     if params['qual_trim']:
-    	print('\tQuality trimming...')
-    	logger.info('Quality trimming...')
-    	cmd += ' SLIDINGWINDOW:4:20'.format(**params)
+        print('\tQuality trimming...')
+        logger.info('Quality trimming...')
+        cmd += ' SLIDINGWINDOW:4:20'.format(**params)
     cmd += (
     ' MINLEN:{min_len}'
     ' && cat {out}/trim/{name}.f_se.fastq {out}/trim/{name}.r_se.fastq'
@@ -100,19 +100,13 @@ def trim(norm_k_list, params):
     print('\tDone') if cmd_run.returncode == 0 else sys.exit('ERR_TRIM')
 
 
-def normalise(norm_c_list, norm_k_list, params):
+def normalise(norm_perms, params):
     print('Normalising...')
-    cs = norm_c_list.split(',')
-    ks = norm_k_list.split(',')
-    norm_perms = [{'k':k, 'c':c} for k in ks for c in cs]
     cmds = []
     for norm_perm in norm_perms:
-        cmd_vars = {
-        'k':str(norm_perm['k']),
-        'c':str(norm_perm['c']),
-        'pipe':params['pipe'],
-        'out':params['out'],
-        'name':params['name']}
+        cmd_vars = dict(**params,
+                        k=str(norm_perm['k']),
+                        c=str(norm_perm['c']))
         cmd = (
         'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9 -p'
         ' {out}/trim/{name}.fr.fastq'
@@ -137,38 +131,42 @@ def normalise(norm_c_list, norm_k_list, params):
     return norm_perms
 
 
-def assemble(norm_perms, asm_k_list, params):
+def assemble(asm_perms, params):
     '''
     Performs multiple assemblies and returns and OrderedDict of assembly names and paths
     '''
     print('Assembling...')
-    asm_perms = [{'k':p['k'],'c':p['c']} for p in norm_perms]
-    asm_k_list_fmt = 'k' + asm_k_list.replace(',', 'k')
+
+    if params['asm_k']:
+        asm_k_fmt = 'k' + 'k'.join(params['asm_k'])
+    else:
+        asm_k_fmt = 'k'
+
     cmds_asm = []
+
     for asm_perm in asm_perms:
         cmd_vars = dict(**params,
-                    	k=str(asm_perm['k']),
-                    	c=str(asm_perm['c']),
-                    	asm_k_list=asm_k_list,
-                    	asm_k_list_fmt=asm_k_list_fmt)
+                        k=str(asm_perm['k']),
+                        c=str(asm_perm['c']),
+                        asm_k_fmt=asm_k_fmt)
         cmd_asm = (
         'spades.py -m 8 -t {threads}'
         ' --pe1-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq'
         ' --pe1-2 {out}/norm/{name}.norm_k{k}c{c}.r_pe.fastq'.format(**cmd_vars))
-        if asm_k_list:
-        	cmd_asm += ' -k {asm_k_list}'.format(**cmd_vars)
+        if params['asm_k']:
+            cmd_asm += ' -k {asm_k}'.format(**cmd_vars)
         cmd_asm += (
         ' --s1 {out}/norm/{name}.norm_k{k}c{c}.se.fastq'
-        ' -o {out}/asm/{name}.norm_k{k}c{c}.asm_{asm_k_list_fmt} --careful'.format(**cmd_vars))
+        ' -o {out}/asm/{name}.norm_k{k}c{c}.asm_{asm_k_fmt} --careful'.format(**cmd_vars))
         cmds_asm.append(cmd_asm)
-        print('\tAssembling norm_c={c}, norm_k={k}, asm_k={asm_k_list}'.format(**cmd_vars))
+        print('\tAssembling norm_c={c}, norm_k={k}, asm_k={asm_k}'.format(**cmd_vars))
     if params['no_norm']:
-    	cmd_asm = (
-    	'spades.py -m 8 -t 12'
-    	' --12 {out}/trim/{name}.fr.fastq'
-    	' -s {out}/trim/{name}.se.fastq'
-    	' -o {out}/asm/{name}.no_norm.asm_{asm_k_list_fmt} --careful'.format(**cmd_vars))
-    	cmds_asm.append(cmd_asm)
+        cmd_asm = (
+        'spades.py -m 8 -t 12'
+        ' --12 {out}/trim/{name}.fr.fastq'
+        ' -s {out}/trim/{name}.se.fastq'
+        ' -o {out}/asm/{name}.no_norm.asm_{asm_k_fmt} --careful'.format(**cmd_vars))
+        cmds_asm.append(cmd_asm)
     with multiprocessing.Pool(params['threads']) as pool:
         results = pool.map(run, cmds_asm)
     logger.info([result.stdout for result in results])
@@ -509,7 +507,7 @@ def main(
     qual_trim=False,
     blast=False,
     norm_c_list=None, norm_k_list=None,
-    asm_k_list='', no_norm=False,
+    asm_k_list=None, no_norm=False,
     blast_db='em_rel', blast_max_seqs=5, min_len=500,
     out_prefix='sparna', threads=4):
 
@@ -520,7 +518,17 @@ def main(
                   pipe=os.path.dirname(os.path.realpath(__file__)),
                   qual_trim=qual_trim,
                   no_norm=no_norm,
+                  norm_c=norm_c_list.split(',') if norm_c_list else 0,
+                  norm_k=norm_k_list.split(',') if norm_k_list else 0,
+                  asm_k=asm_k_list if asm_k_list else 0,
                   threads=threads)
+
+    if norm_k_list and norm_c_list:
+        norm_perms = [{'k':k, 'c':c} for k in params['norm_k'] for c in params['norm_c']]
+        asm_perms = [{'k':p['k'],'c':p['c']} for p in norm_perms]
+    else:
+        norm_perms = [{'k':'0', 'c':'0'}]
+        asm_perms = [{'k':'0', 'c':'0'}]
 
     for dir in ['raw', 'trim', 'norm', 'asm', 'asm_prune', 'remap', 'eval']:
         if not os.path.exists(params['out'] + '/' + dir):
@@ -528,8 +536,12 @@ def main(
 
     import_reads(fwd_fq, rev_fq, params)
     trim(norm_k_list, params)
-    norm_perms = normalise(norm_c_list, norm_k_list, params)
-    asms_paths_full = assemble(norm_perms, asm_k_list, params)
+    if no_norm:
+        norm_perms = None
+    else:
+        norm_perms = normalise(norm_perms, params)
+    print(norm_perms)
+    asms_paths_full = assemble(asm_perms, params)
     asms_paths = prune_assemblies(asms_paths_full, min_len, params)
     
     asms_names = {a: [r.id for r in SeqIO.parse(p, 'fasta')] for a, p in asms_paths.items()}
