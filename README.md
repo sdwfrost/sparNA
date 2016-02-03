@@ -1,6 +1,6 @@
 # sparNA  
 
-sparNA is a pipeline for assembling high depth paired-end sequencing reads from diverse viruses such as HIV and HCV. *In silico* normalisation can improve the contiguity of such assemblies, but should be parameterised on a per-sample basis for best results. sparNA accepts paired Illumina reads and lists of normalisation target coverage `c` and normalisation `k` values. Input reads are optionally trimmed and normalised in parallel using Khmer's `normalize-by-median.py` according to each combination of `c` and `k`, and each set of reads is subsequently assembled with SPAdes. BLAST results for the top n contigs in each assembly are retrieved using the EBI BLAST web service and an interactive plot of the assemblies is generated for scrutiny by the user. The default BLAST db is the complete EBI sequence release `em_rel`, but for faster searches, the smaller viral `em_rel_vrl` db may be used.  
+sparNA is a pipeline for assembling high depth paired-end sequencing reads from diverse viruses such as HIV and HCV. *In silico* normalisation can improve the contiguity of such assemblies, but should be parameterised on a per-sample basis for best results. sparNA accepts paired Illumina reads and lists of normalisation target coverage `c` and normalisation `k` values. Adapter sequences are trimmed with trimmomatuc and optionally quality trimmed with the `--qual-trim` flag, and then normalised in parallel using Khmer's `normalize-by-median.py` according to each combination of `c` and `k`, and each set of reads is subsequently assembled with SPAdes. BLAST results for the top n contigs in each assembly are retrieved using the EBI BLAST web service and an interactive plot of the assemblies is generated for scrutiny by the user. The default BLAST db is the complete EBI sequence release `em_rel`, but for faster searches, the smaller viral `em_rel_vrl` db may be used.  
   
 ![Plot example](./plot.png)  
   
@@ -23,8 +23,19 @@ Finally, sign up for a Plotly account and set your [API key](https://plot.ly/set
 Unzip `sparna.py` and the `res/` directory
 Ensure dependencies are discoverable inside $PATH  
 N.B. Specify reads using absolute paths  
-Having issues? Set log level to `INFO` for verbose output  
+Having issues? Set log level to `INFO` for verbose output
 
+
+Run sparNA without quality trimming (just adapter trimming) and using default SPAdes k-mers  
+```
+./sparna.py --fwd-fq /Users/Bede/oxgl/1.f.fastq --rev-fq /Users/Bede/oxgl/1.r.fastq --norm-c-list 1,5,20,100 --norm-k-list 21,25,31 --out-prefix 1_no_qtrim-norm_c1c5c10c20c100k21k25k31 --threads 6 \
+```
+  
+Run sparNA with PHRED Q20 sliding window 3' trimming and using default SPAdes k-mers and additionally perform assembly without prior normalisation  
+
+```
+./sparna.py --qual-trim --no-norm--fwd-fq /Users/Bede/oxgl/1.f.fastq --rev-fq /Users/Bede/oxgl/1.r.fastq --norm-c-list 1,5,20,100 --norm-k-list 21,25,31 --out-prefix 1_qtrim-norm_c0c1c5c10c20c100k0k21k25k31
+  
 
 ```
 ./sparna.py --trimming --blast

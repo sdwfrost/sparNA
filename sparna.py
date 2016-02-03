@@ -40,7 +40,7 @@ import plotly.plotly as py
 import plotly.graph_objs as go
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 
@@ -74,7 +74,7 @@ def import_reads(fwd_fq, rev_fq, params):
 def trim(norm_k_list, params):
     print('Trimming...')
     # Fetch smallest norm_k for trimming with Trimmomatic min_len - Screed bug workaround
-    params['min_len'] = max(map(int, norm_k_list.split(','))) if not params['no_norm'] else 0
+    params['min_len'] = max(map(int, norm_k_list.split(',')))
     cmd = (
     'java -jar {pipe}/res/trimmomatic-0.33.jar PE'
     ' {out}/raw/{name}.f.fastq'
@@ -143,12 +143,21 @@ def assemble(asm_perms, params):
         asm_k_fmt = 'k'
 
     cmds_asm = []
+    cmd_vars = dict(**params,
+                    asm_k_fmt=asm_k_fmt)
+    
+    if params['no_norm']:
+        cmd_asm = (
+        'spades.py -m 8 -t 12'
+        ' --12 {out}/trim/{name}.fr.fastq'
+        ' -s {out}/trim/{name}.se.fastq'
+        ' -o {out}/asm/{name}.no_norm.asm_{asm_k_fmt} --careful'.format(**cmd_vars))
+        print('\tAssembling without prior normalisation'.format(**cmd_vars))
+        cmds_asm.append(cmd_asm)
 
     for asm_perm in asm_perms:
-        cmd_vars = dict(**params,
-                        k=str(asm_perm['k']),
-                        c=str(asm_perm['c']),
-                        asm_k_fmt=asm_k_fmt)
+        cmd_vars['k'] = str(asm_perm['k'])
+        cmd_vars['c'] = str(asm_perm['c'])
         cmd_asm = (
         'spades.py -m 8 -t {threads}'
         ' --pe1-1 {out}/norm/{name}.norm_k{k}c{c}.f_pe.fastq'
@@ -160,13 +169,7 @@ def assemble(asm_perms, params):
         ' -o {out}/asm/{name}.norm_k{k}c{c}.asm_{asm_k_fmt} --careful'.format(**cmd_vars))
         cmds_asm.append(cmd_asm)
         print('\tAssembling norm_c={c}, norm_k={k}, asm_k={asm_k}'.format(**cmd_vars))
-    if params['no_norm']:
-        cmd_asm = (
-        'spades.py -m 8 -t 12'
-        ' --12 {out}/trim/{name}.fr.fastq'
-        ' -s {out}/trim/{name}.se.fastq'
-        ' -o {out}/asm/{name}.no_norm.asm_{asm_k_fmt} --careful'.format(**cmd_vars))
-        cmds_asm.append(cmd_asm)
+
     with multiprocessing.Pool(params['threads']) as pool:
         results = pool.map(run, cmds_asm)
     logger.info([result.stdout for result in results])
@@ -218,7 +221,7 @@ def map_to_assemblies(asms_paths, params):
         ' 2> {out}/remap/{asm}.bt2.stats',
         'grep -v XS:i: {out}/remap/{asm}.sam > {out}/remap/{asm}.uniq.sam',
         'samtools view -bS {out}/remap/{asm}.uniq.sam'
-        ' | samtools sort - {out}/remap/{asm}.uniq',
+        ' | samtools sort - -o {out}/remap/{asm}.uniq.bam',
         'samtools index {out}/remap/{asm}.uniq.bam',
         'samtools idxstats {out}/remap/{asm}.uniq.bam'
         ' > {out}/remap/{asm}.uniq.bam.stats']
@@ -518,8 +521,8 @@ def main(
                   pipe=os.path.dirname(os.path.realpath(__file__)),
                   qual_trim=qual_trim,
                   no_norm=no_norm,
-                  norm_c=norm_c_list.split(',') if norm_c_list else 0,
-                  norm_k=norm_k_list.split(',') if norm_k_list else 0,
+                  norm_c=norm_c_list.split(',') if norm_c_list else None,
+                  norm_k=norm_k_list.split(',') if norm_k_list else None,
                   asm_k=asm_k_list if asm_k_list else 0,
                   threads=threads)
 
@@ -536,11 +539,10 @@ def main(
 
     import_reads(fwd_fq, rev_fq, params)
     trim(norm_k_list, params)
-    if no_norm:
-        norm_perms = None
-    else:
+    if norm_k_list and norm_c_list:
         norm_perms = normalise(norm_perms, params)
-    print(norm_perms)
+    else:
+        norm_perms = None
     asms_paths_full = assemble(asm_perms, params)
     asms_paths = prune_assemblies(asms_paths_full, min_len, params)
     
