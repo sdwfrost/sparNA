@@ -40,7 +40,7 @@ import plotly.plotly as py
 import plotly.graph_objs as go
 
 
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -108,7 +108,7 @@ def normalise(norm_perms, params):
                         k=str(norm_perm['k']),
                         c=str(norm_perm['c']))
         cmd = (
-        'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9 -p'
+        'normalize-by-median.py -C {c} -k {k} -N 4 -x 1e8 -p'
         ' {out}/trim/{name}.fr.fastq'
         ' -o {out}/norm/{name}.norm_k{k}c{c}.fr.fastq'
         ' && normalize-by-median.py -C {c} -k {k} -N 4 -x 1e9'
