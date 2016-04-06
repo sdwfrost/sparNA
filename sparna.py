@@ -24,12 +24,16 @@ import io
 import sys
 import argh
 import time
+import json
 import pandas
 import pprint
 import logging
 import requests
 import subprocess
 import multiprocessing
+import concurrent.futures
+
+import pprint
 
 from collections import OrderedDict
 
@@ -246,6 +250,138 @@ def map_to_assemblies(asms_paths, params):
     return asms_coverages
 
 
+
+def onecodex_lca(seq, onecodex_api_key):
+    '''
+    Returns dict of OneCodex real-time API k-mer hits for a given sequence
+    e.g. {'elapsed_secs':'0.0003','k': 31,'n_hits': 97,'n_lookups': 128,'tax_id': 9606}
+    '''
+    url = 'https://app.onecodex.com/api/v0/search'
+    payload = {'sequence':str(seq)}
+    auth = requests.auth.HTTPBasicAuth(onecodex_api_key, '')
+    response = requests.post(url, payload, auth=auth, timeout=5)
+    result = json.loads(response.text)
+    result['prop_hits'] = round(int(result['n_hits'])/int(result['n_lookups']), 3)
+    return result
+
+def ebi_taxid_to_lineage(tax_id):
+    '''
+    Returns scientific name and lineage for a given taxid using EBI's taxonomy API
+    e.g.('Retroviridae', ['Viruses', 'Retro-transcribing viruses'])
+    '''
+    url = 'http://www.ebi.ac.uk/ena/data/taxonomy/v1/taxon/tax-id/{}'
+    if tax_id == 0 or tax_id == 1:
+        return None, None
+    response = requests.get(url.format(tax_id), timeout=5)
+    result = json.loads(response.text)
+    sciname = result['scientificName']
+    taxonomy = [x for x in result['lineage'].split('; ') if x]
+    return sciname, taxonomy
+
+def onecodex_lca_taxa(seqrecord, onecodex_api_key):
+    '''
+    Returns a scientific name and lineage for a SeqRecord using OneCodex and EBI APIs
+    e.g. ('NODE_3_length_4481_cov_46.6129_ID_7947',
+     ('Hepatitis C virus genotype 3',
+      ['Viruses',
+       'ssRNA viruses',
+       'ssRNA positive-strand viruses, no DNA stage',
+       'Flaviviridae',
+       'Hepacivirus']))
+    '''
+    hits = onecodex_lca(str(seqrecord.seq), onecodex_api_key)
+    sciname, taxonomy = ebi_taxid_to_lineage(hits['tax_id'])
+    result = (sciname, taxonomy, hits)
+    return result
+
+def fasta_onecodex_lca_taxa(fasta_path, onecodex_api_key):
+    '''
+    Executes onecodex_lca_taxa() in parallel for a multifasta file
+    '''
+    seqrecords = SeqIO.parse(fasta_path, 'fasta')
+    taxa = {}
+    with concurrent.futures.ThreadPoolExecutor(50) as executor:
+        futures = {executor.submit(onecodex_lca_taxa, seqrecord, onecodex_api_key): seqrecord for seqrecord in seqrecords}
+        for future in concurrent.futures.as_completed(futures):
+            seqrecord = futures[future]
+            try:
+                data = future.result()
+            except Exception as exception:
+                taxa[seqrecord.id] = (None, None, None)
+                logger.info('Skipping '.format(seqrecord.id))
+            else:
+                taxa[seqrecord.id] = future.result()
+    return taxa
+
+def onecodex_assemblies(asms_paths, onecodex_api_key):
+    '''
+    Returns OneCodex hits for a dict of assembly names and corresponding paths 
+    '''
+    print('Identifying taxonomic assignments...')
+    sample_results = OrderedDict()
+    for asm_name, asm_path in asms_paths.items():
+        print('\tAssembly {}'.format(asm_name))
+        sample_results[asm_name] = fasta_onecodex_lca_taxa(asm_path, onecodex_api_key)
+    return sample_results
+
+def seqrecords(fasta_path):
+    '''
+    Accepts path to multifasta, returns list of Biopython SeqRecords
+    '''
+    return SeqIO.parse(fasta_path, 'fasta')
+
+def lengths(seqrecords):
+    '''
+    Accepts path to multifasta, returns OrderedDict of sequence lengths 
+    '''
+    lengths = OrderedDict()
+    for record in seqrecords:
+        lengths[record.id] = len(record.seq)
+    return lengths
+
+def gc_contents(seqrecords):
+    '''
+    Accepts path to multifasta, returns OrderedDict of sequence GC content
+    '''
+    gc_contents = OrderedDict()
+    for record in seqrecords:
+        gc_contents[record.id] = SeqUtils.GC(record.seq)/100
+    return gc_contents
+
+def marker_metadata(asms_paths, lengths, gc_contents, taxa):
+    for asm_name, asm_path in asms_paths.items():
+        print('ASMNAMEE: ', asm_name)
+    '''
+    Returns summary metadata for each sequence
+    '''
+    metadata = {}
+    for asm_name, asm_path in asms_paths.items():
+        metadata[asm_name] = OrderedDict()
+        records = seqrecords(asm_path)
+        for i, record in enumerate(records):
+            lineage = ';'.join(taxa[asm_name][record.id][1]) if taxa[asm_name][record.id][1] else ''
+            lineage_fmt = (lineage[:40] + '..') if len(lineage) > 50 else lineage
+            text = (
+                '{}<br>'
+                'lca: {} (taxid: {})<br>'
+                'lineage: {}<br>'
+                'length: {}<br>'
+                'gc_content: {}<br>'
+                ''.format(record.id,
+                          taxa[asm_name][record.id][0],
+                          0,
+                          #taxa[asm_name][record.id][2]['tax_id'],
+                          lineage_fmt,
+                          lengths[asm_name][i],
+                          round(float(gc_contents[asm_name][i]), 3)))
+            metadata[asm_name][record.id] = text
+    return metadata
+
+
+
+
+
+
 def build_ebi_blast_query(title, sequence, database):
     '''
     Returns dict of REST params for the EBI BLAST API
@@ -438,20 +574,59 @@ def blast_summary(blast_results, asms_covs):
     return asms_summaries
 
 
-def plotly(asms_names, asms_stats, blast, params):
+
+def plotly_len_gc(seq_ids, lengths, gc_contents, colours, metadata):
+    trace = []
+    for seq_id in seq_ids[:100]:
+        trace.append(
+            plotly.graph_objs.Scattergl(
+                x=[lengths[seq_id]],
+                y=[gc_contents[seq_id]],
+                mode='markers',
+                name=seq_id,
+                text=metadata[seq_id],
+                marker=dict(
+                    opacity=0.8,
+                    symbol='circle',
+                    color=colours[seq_id],
+                    line=dict(width=1))))
+
+    layout = plotly.graph_objs.Layout(
+        title='Contig length vs. GC content',
+        showlegend=False,
+        paper_bgcolor='rgb(243, 243, 243)',
+        plot_bgcolor='rgb(243, 243, 243)',
+        xaxis=dict(
+            title='Contig length',
+            gridcolor='rgb(255, 255, 255)',
+            zerolinewidth=1,
+            type='log',
+            gridwidth=2),
+        yaxis=dict(
+            title='GC content',
+            gridcolor='rgb(255, 255, 255)',
+            zerolinewidth=1,
+            gridwidth=2))
+    
+    fig = plotly.graph_objs.Figure(data=trace, layout=layout)
+    return plotly.offline.plot(fig, filename='contigs')
+
+
+
+def plotly(asms_names, asms_stats, onecodex, params):
     cov_max = max(sum([i for i in asms_stats['covs'].values()], []))
     cov_scale_factor = round(cov_max/5000, 1) # For bubble scaling
 
     traces = []
     for asm_name in asms_names:
-        if blast:
+        if onecodex:
             traces.append(
                 go.Scatter(
                     x=asms_stats['lens'][asm_name],
                     y=asms_stats['gc'][asm_name],
                     mode='lines+markers',
                     name=asm_name,
-                    text=asms_stats['blast_summary'][asm_name],
+                    text=asms_stats['legend'][asm_name],
                     line=dict(shape='spline'),
                     marker=dict(
                         opacity=0.5,
@@ -508,9 +683,10 @@ def report(chart_url, start_time, end_time, params):
 def main(
     fwd_fq=None, rev_fq=None,
     qual_trim=False,
-    blast=False,
+    blast=False, onecodex=False,
     norm_c_list=None, norm_k_list=None,
     asm_k_list=None, no_norm=False,
+    onecodex_api_key='a1d32ce32583468192101cc1d0cf27ec',
     blast_db='em_rel', blast_max_seqs=5, min_len=500,
     out_prefix='sparna', threads=4):
 
@@ -549,29 +725,61 @@ def main(
     asms_names = {a: [r.id for r in SeqIO.parse(p, 'fasta')] for a, p in asms_paths.items()}
     asms_lens = {a: [int(n.split('_')[3]) for n in ns] for a, ns in asms_names.items()}
     asms_covs = map_to_assemblies(asms_paths, params)
+    asms_gc = gc_content(asms_paths)
     
-    if blast:
-        blast_results = blast_assemblies(asms_paths, blast_db, blast_max_seqs, min_len)
+
+
+
+
+
+
+    # contig_taxa = fasta_onecodex_lca_taxa(fasta_path, onecodex_api_key)
+
+    # plotly_len_gc(contig_ids, contig_lengths, contig_gc_contents, contig_colours, contig_metadata)
+
+    if onecodex:
+        onecodex_taxa = onecodex_assemblies(asms_paths, onecodex_api_key)
+        
+
+
+        print(asms_names)
+        print('lengths', asms_lens)
+        print('covs', asms_covs)
+        pprint.pprint(onecodex_taxa)
+
+        metadata_summaries = marker_metadata(asms_paths, asms_lens, asms_gc, onecodex_taxa)
+
+        pprint.pprint(metadata_summaries)
+
+
+
+
+    if onecodex:
         asms_stats = dict(names=asms_names,
                           lens=asms_lens,
                           covs=asms_covs,
-                          blast_summary=blast_summary(blast_results, asms_covs), 
-                          blast_superkingdoms=blast_superkingdoms(blast_results),
-                          gc=gc_content(asms_paths),
+                          legend=metadata_summaries,
+                          gc=asms_gc,
                           cpg=None)
     else:
         asms_stats = dict(names=asms_names,
                           lens=asms_lens,
                           covs=asms_covs,
-                          gc=gc_content(asms_paths),
+                          gc=asms_gc,
                           cpg=None)
 
-    chart_url = plotly(asms_names, asms_stats, blast, params)
+    print(asms_stats['legend'].keys())
 
+    chart_url = plotly(asms_names, asms_stats, onecodex, params)
     report(chart_url, start_time, time.time(), params)
 
-    # print('asms_stats = ', end='')
-    # print(asms_stats)
+
+
+
+
+#     chart_url = plotly(asms_names, asms_stats, blast, params)
+
+#     report(chart_url, start_time, time.time(), params)
 
 
 argh.dispatch_command(main)
