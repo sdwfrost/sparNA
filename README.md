@@ -33,7 +33,7 @@ Run sparNA with PHRED Q20 sliding window 3' trimming and using default SPAdes k-
 
 ```
 ./sparna.py --qual-trim --no-norm--fwd-fq /Users/Bede/oxgl/1.f.fastq --rev-fq /Users/Bede/oxgl/1.r.fastq --norm-c-list 1,5,20,100 --norm-k-list 21,25,31 --out-prefix 1_qtrim-norm_c0c1c5c10c20c100k0k21k25k31
-  
+```
 
 ```
 ./sparna.py --trimming --blast
