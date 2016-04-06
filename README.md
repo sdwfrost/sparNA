@@ -16,8 +16,6 @@ Using Homebrew and pip is the easiest approach
 - `brew tap homebrew/homebrew-science`
 - `brew install python3 spades bowtie2 samtools vcftools bcftools seqtk`
 - `pip3 install argh numpy biopython khmer pandas plotly`  
-Finally, sign up for a Plotly account and set your [API key](https://plot.ly/settings/api)  
-- `python3 -c "import plotly; plotly.tools.set_credentials_file(username='USERNAME', api_key='API_KEY')"`  
 
 ## Usage
 Unzip `sparna.py` and the `res/` directory
@@ -35,7 +33,7 @@ Run sparNA with PHRED Q20 sliding window 3' trimming and using default SPAdes k-
 
 ```
 ./sparna.py --qual-trim --no-norm--fwd-fq /Users/Bede/oxgl/1.f.fastq --rev-fq /Users/Bede/oxgl/1.r.fastq --norm-c-list 1,5,20,100 --norm-k-list 21,25,31 --out-prefix 1_qtrim-norm_c0c1c5c10c20c100k0k21k25k31
-  
+```
 
 ```
 ./sparna.py --trimming --blast

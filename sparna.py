@@ -36,11 +36,11 @@ from collections import OrderedDict
 from Bio import SeqIO
 from Bio import SeqUtils
 
-import plotly.plotly as py
+import plotly.offline as py
 import plotly.graph_objs as go
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 
@@ -438,7 +438,7 @@ def blast_summary(blast_results, asms_covs):
     return asms_summaries
 
 
-def plotly(asms_names, asms_stats, blast):
+def plotly(asms_names, asms_stats, blast, params):
     cov_max = max(sum([i for i in asms_stats['covs'].values()], []))
     cov_scale_factor = round(cov_max/5000, 1) # For bubble scaling
 
@@ -494,7 +494,7 @@ def plotly(asms_names, asms_stats, blast):
         plot_bgcolor='rgb(243, 243, 243)')
 
     fig = go.Figure(data=traces, layout=layout)
-    return py.plot(fig)
+    return py.plot(fig, filename=params['out'] + '/plot.html')
 
 
 def report(chart_url, start_time, end_time, params):
@@ -566,7 +566,7 @@ def main(
                           gc=gc_content(asms_paths),
                           cpg=None)
 
-    chart_url = plotly(asms_names, asms_stats, blast)
+    chart_url = plotly(asms_names, asms_stats, blast, params)
 
     report(chart_url, start_time, time.time(), params)
 
