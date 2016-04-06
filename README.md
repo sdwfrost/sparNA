@@ -16,8 +16,6 @@ Using Homebrew and pip is the easiest approach
 - `brew tap homebrew/homebrew-science`
 - `brew install python3 spades bowtie2 samtools vcftools bcftools seqtk`
 - `pip3 install argh numpy biopython khmer pandas plotly`  
-Finally, sign up for a Plotly account and set your [API key](https://plot.ly/settings/api)  
-- `python3 -c "import plotly; plotly.tools.set_credentials_file(username='USERNAME', api_key='API_KEY')"`  
 
 ## Usage
 Unzip `sparna.py` and the `res/` directory
