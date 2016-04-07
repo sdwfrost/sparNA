@@ -490,8 +490,7 @@ def ebi_annotated_blast(query):
             hits_annotations = None
             break
         elif status.text == 'RUNNING':
-            time.sleep(10)
-            print('.', end='')
+            time.sleep(5)
         else:
             logger.error('status: ' + status.text)
             hits_annotations = None
@@ -534,7 +533,7 @@ def blast_assemblies(asms_paths, database, max_seqs, min_len):
     print('BLASTing assemblies...')
     sample_results = OrderedDict()
     for asm_name, asm_path in asms_paths.items():
-        print('\n\tAssembly {}'.format(asm_name))
+        print('\tAssembly {}'.format(asm_name))
         sample_results[asm_name] = fasta_blaster(asm_path, database, max_seqs, min_len)
     return sample_results
 
@@ -575,13 +574,13 @@ def blast_summary(blast_results, asms_covs):
     return asms_summaries
 
 
-def plotly(asms_names, asms_stats, onecodex, params):
+def plotly(asms_names, asms_stats, lca, blast, params):
     cov_max = max(sum([i for i in asms_stats['covs'].values()], []))
     cov_scale_factor = round(cov_max/5000, 1) # For bubble scaling
 
     traces = []
     for asm_name in asms_names:
-        if onecodex:
+        if lca:
             traces.append(
                 go.Scatter(
                     x=asms_stats['lens'][asm_name],
@@ -589,6 +588,22 @@ def plotly(asms_names, asms_stats, onecodex, params):
                     mode='lines+markers',
                     name=asm_name,
                     text=asms_stats['legend'][asm_name],
+                    line=dict(shape='spline'),
+                    marker=dict(
+                        opacity=0.5,
+                        symbol='circle',
+                        sizemode='area',
+                        sizeref=cov_scale_factor,
+                        size=asms_stats['covs'][asm_name],
+                        line=dict(width=1))))
+        elif blast:
+            traces.append(
+                go.Scatter(
+                    x=asms_stats['lens'][asm_name],
+                    y=asms_stats['gc'][asm_name],
+                    mode='lines+markers',
+                    name=asm_name,
+                    text=asms_stats['blast_summary'][asm_name],
                     line=dict(shape='spline'),
                     marker=dict(
                         opacity=0.5,
@@ -645,7 +660,7 @@ def report(chart_url, start_time, end_time, params):
 def main(
     fwd_fq=None, rev_fq=None,
     qual_trim=False,
-    blast=False, lca=False,
+    lca=False, blast=False,
     norm_c_list=None, norm_k_list=None,
     asm_k_list=None, no_norm=False,
     onecodex_api_key='a1d32ce32583468192101cc1d0cf27ec',
@@ -715,6 +730,16 @@ def main(
         # pprint.pprint(lca_taxa)
         # pprint.pprint(metadata_summaries)
 
+    elif blast:
+        blast_results = blast_assemblies(asms_paths, blast_db, blast_max_seqs, min_len)
+        asms_stats = dict(names=asms_names,
+                          lens=asms_lens,
+                          covs=asms_covs,
+                          blast_summary=blast_summary(blast_results, asms_covs), 
+                          blast_superkingdoms=blast_superkingdoms(blast_results),
+                          gc=gc_content(asms_paths),
+                          cpg=None)
+
     else:
         asms_stats = dict(names=asms_names,
                           lens=asms_lens,
@@ -722,7 +747,7 @@ def main(
                           gc=asms_gc,
                           cpg=None)
 
-    chart_url = plotly(asms_names, asms_stats, lca, params)
+    chart_url = plotly(asms_names, asms_stats, lca, blast, params)
     report(chart_url, start_time, time.time(), params)
 
 
