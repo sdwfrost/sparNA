@@ -26,7 +26,6 @@ import argh
 import time
 import json
 import pandas
-import pprint
 import logging
 import requests
 import subprocess
@@ -213,6 +212,8 @@ def map_to_assemblies(asms_paths, params):
     print('Aligning to assemblies... (Bowtie2)')
     asms_coverages = {}
     for asm, asm_path in asms_paths.items():
+        i = 0
+        print(asm, i)
         cmd_vars = {**params,
                     'asm':asm,
                     'asm_path':asm_path}
@@ -243,8 +244,9 @@ def map_to_assemblies(asms_paths, params):
         asm_coverages = []
         with open('{out}/remap/{asm}.uniq.bam.stats'.format(**cmd_vars), 'r') as bam_stats:
             for line in bam_stats:
-                reads_mapped = int(line.strip().split('\t')[2])
-                asm_coverages.append(int(reads_mapped))
+                if not line.startswith('*'):
+                    reads_mapped = int(line.strip().split('\t')[2])
+                    asm_coverages.append(int(reads_mapped))
         
         asms_coverages[asm] = asm_coverages
     return asms_coverages
@@ -330,33 +332,37 @@ def seqrecords(fasta_path):
     '''
     return SeqIO.parse(fasta_path, 'fasta')
 
-def lengths(seqrecords):
+def lengths(asms_paths):
     '''
     Accepts path to multifasta, returns OrderedDict of sequence lengths 
     '''
-    lengths = OrderedDict()
-    for record in seqrecords:
-        lengths[record.id] = len(record.seq)
+    lengths = {}
+    for asm_name, asm_path in asms_paths.items():
+        lengths[asm_name] = []
+        records = seqrecords(asm_path)
+        for record in records:
+            lengths[asm_name].append(len(record.seq))
     return lengths
 
-def gc_contents(seqrecords):
+def gc_contents(asms_paths):
     '''
     Accepts path to multifasta, returns OrderedDict of sequence GC content
     '''
-    gc_contents = OrderedDict()
-    for record in seqrecords:
-        gc_contents[record.id] = SeqUtils.GC(record.seq)/100
+    gc_contents = {}
+    for asm_name, asm_path in asms_paths.items():
+        records = seqrecords(asm_path)
+        gc_contents[asm_name] = []
+        for record in seqrecords:
+            gc_contents[record.id].append(SeqUtils.GC(record.seq)/100)
     return gc_contents
 
 def marker_metadata(asms_paths, lengths, gc_contents, taxa):
-    for asm_name, asm_path in asms_paths.items():
-        print('ASMNAMEE: ', asm_name)
     '''
     Returns summary metadata for each sequence
     '''
     metadata = {}
     for asm_name, asm_path in asms_paths.items():
-        metadata[asm_name] = OrderedDict()
+        metadata[asm_name] = []
         records = seqrecords(asm_path)
         for i, record in enumerate(records):
             lineage = ';'.join(taxa[asm_name][record.id][1]) if taxa[asm_name][record.id][1] else ''
@@ -374,7 +380,7 @@ def marker_metadata(asms_paths, lengths, gc_contents, taxa):
                           lineage_fmt,
                           lengths[asm_name][i],
                           round(float(gc_contents[asm_name][i]), 3)))
-            metadata[asm_name][record.id] = text
+            metadata[asm_name].append(text)
     return metadata
 
 
@@ -723,44 +729,36 @@ def main(
     asms_paths = prune_assemblies(asms_paths_full, min_len, params)
     
     asms_names = {a: [r.id for r in SeqIO.parse(p, 'fasta')] for a, p in asms_paths.items()}
-    asms_lens = {a: [int(n.split('_')[3]) for n in ns] for a, ns in asms_names.items()}
+    asms_lens = lengths(asms_paths)
     asms_covs = map_to_assemblies(asms_paths, params)
     asms_gc = gc_content(asms_paths)
     
-
-
-
-
-
-
-    # contig_taxa = fasta_onecodex_lca_taxa(fasta_path, onecodex_api_key)
-
-    # plotly_len_gc(contig_ids, contig_lengths, contig_gc_contents, contig_colours, contig_metadata)
-
     if onecodex:
         onecodex_taxa = onecodex_assemblies(asms_paths, onecodex_api_key)
-        
-
-
-        print(asms_names)
-        print('lengths', asms_lens)
-        print('covs', asms_covs)
-        pprint.pprint(onecodex_taxa)
-
         metadata_summaries = marker_metadata(asms_paths, asms_lens, asms_gc, onecodex_taxa)
-
-        pprint.pprint(metadata_summaries)
-
-
-
-
-    if onecodex:
         asms_stats = dict(names=asms_names,
                           lens=asms_lens,
                           covs=asms_covs,
                           legend=metadata_summaries,
                           gc=asms_gc,
                           cpg=None)
+
+        print('\npaths', asms_paths)
+        print('\nasm_names', asms_names)
+        print(len(asms_names['060-660_r1_Cap1_F.norm_k21c1.asm_k']))
+        print(len(asms_names['060-660_r1_Cap1_F.norm_k21c10.asm_k']))
+        print('\nlengths', asms_lens)
+        print(len(asms_lens['060-660_r1_Cap1_F.norm_k21c1.asm_k']))
+        print(len(asms_lens['060-660_r1_Cap1_F.norm_k21c10.asm_k']))
+        print('\ncovs', asms_covs)
+        print(len(asms_covs['060-660_r1_Cap1_F.norm_k21c1.asm_k']))
+        print(len(asms_covs['060-660_r1_Cap1_F.norm_k21c10.asm_k']))
+        print('\ngc', asms_gc)
+        print(len(asms_gc['060-660_r1_Cap1_F.norm_k21c1.asm_k']))
+        print(len(asms_gc['060-660_r1_Cap1_F.norm_k21c10.asm_k']))
+        pprint.pprint(onecodex_taxa)
+        pprint.pprint(metadata_summaries)
+
     else:
         asms_stats = dict(names=asms_names,
                           lens=asms_lens,
@@ -768,18 +766,8 @@ def main(
                           gc=asms_gc,
                           cpg=None)
 
-    print(asms_stats['legend'].keys())
-
     chart_url = plotly(asms_names, asms_stats, onecodex, params)
     report(chart_url, start_time, time.time(), params)
-
-
-
-
-
-#     chart_url = plotly(asms_names, asms_stats, blast, params)
-
-#     report(chart_url, start_time, time.time(), params)
 
 
 argh.dispatch_command(main)

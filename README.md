@@ -7,7 +7,7 @@ sparNA is a pipeline for assembling high depth paired-end sequencing reads from 
 Feel free to get in touch via b|at|bede|dot|im or [Twitter](https://twitter.com/beconstant) 
 
 ## Dependencies  
-Tested on OS X. Should work fine on Linux.  
+Tested on OS X. I'm informed it also runs on Ubuntu with dependencies installed via `apt-get` and Linuxbrew  
 Requires: Java, **Python 3.5**, SPAdes, Bowtie2, Samtools, VCFtools, BCFtools, SeqTK, Argh, Biopython, Khmer, Pandas, Plotly  
 Trimmomatic (jar file) is bundled inside `res/`  
 
