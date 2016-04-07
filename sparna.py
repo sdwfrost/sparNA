@@ -252,7 +252,6 @@ def map_to_assemblies(asms_paths, params):
     return asms_coverages
 
 
-
 def onecodex_lca(seq, onecodex_api_key):
     '''
     Returns dict of OneCodex real-time API k-mer hits for a given sequence
@@ -319,7 +318,7 @@ def onecodex_assemblies(asms_paths, onecodex_api_key):
     '''
     Returns OneCodex hits for a dict of assembly names and corresponding paths 
     '''
-    print('Identifying taxonomic assignments...')
+    print('Fetching LCA taxonomic assignments... (requires network access)')
     sample_results = OrderedDict()
     for asm_name, asm_path in asms_paths.items():
         print('\tAssembly {}'.format(asm_name))
@@ -382,10 +381,6 @@ def marker_metadata(asms_paths, lengths, gc_contents, taxa):
                           round(float(gc_contents[asm_name][i]), 3)))
             metadata[asm_name].append(text)
     return metadata
-
-
-
-
 
 
 def build_ebi_blast_query(title, sequence, database):
@@ -580,45 +575,6 @@ def blast_summary(blast_results, asms_covs):
     return asms_summaries
 
 
-
-def plotly_len_gc(seq_ids, lengths, gc_contents, colours, metadata):
-    trace = []
-    for seq_id in seq_ids[:100]:
-        trace.append(
-            plotly.graph_objs.Scattergl(
-                x=[lengths[seq_id]],
-                y=[gc_contents[seq_id]],
-                mode='markers',
-                name=seq_id,
-                text=metadata[seq_id],
-                marker=dict(
-                    opacity=0.8,
-                    symbol='circle',
-                    color=colours[seq_id],
-                    line=dict(width=1))))
-
-    layout = plotly.graph_objs.Layout(
-        title='Contig length vs. GC content',
-        showlegend=False,
-        paper_bgcolor='rgb(243, 243, 243)',
-        plot_bgcolor='rgb(243, 243, 243)',
-        xaxis=dict(
-            title='Contig length',
-            gridcolor='rgb(255, 255, 255)',
-            zerolinewidth=1,
-            type='log',
-            gridwidth=2),
-        yaxis=dict(
-            title='GC content',
-            gridcolor='rgb(255, 255, 255)',
-            zerolinewidth=1,
-            gridwidth=2))
-    
-    fig = plotly.graph_objs.Figure(data=trace, layout=layout)
-    return plotly.offline.plot(fig, filename='contigs')
-
-
-
 def plotly(asms_names, asms_stats, onecodex, params):
     cov_max = max(sum([i for i in asms_stats['covs'].values()], []))
     cov_scale_factor = round(cov_max/5000, 1) # For bubble scaling
@@ -689,7 +645,7 @@ def report(chart_url, start_time, end_time, params):
 def main(
     fwd_fq=None, rev_fq=None,
     qual_trim=False,
-    blast=False, onecodex=False,
+    blast=False, lca=False,
     norm_c_list=None, norm_k_list=None,
     asm_k_list=None, no_norm=False,
     onecodex_api_key='a1d32ce32583468192101cc1d0cf27ec',
@@ -733,9 +689,9 @@ def main(
     asms_covs = map_to_assemblies(asms_paths, params)
     asms_gc = gc_content(asms_paths)
     
-    if onecodex:
-        onecodex_taxa = onecodex_assemblies(asms_paths, onecodex_api_key)
-        metadata_summaries = marker_metadata(asms_paths, asms_lens, asms_gc, onecodex_taxa)
+    if lca:
+        lca_taxa = onecodex_assemblies(asms_paths, onecodex_api_key)
+        metadata_summaries = marker_metadata(asms_paths, asms_lens, asms_gc, lca_taxa)
         asms_stats = dict(names=asms_names,
                           lens=asms_lens,
                           covs=asms_covs,
@@ -743,21 +699,21 @@ def main(
                           gc=asms_gc,
                           cpg=None)
 
-        print('\npaths', asms_paths)
-        print('\nasm_names', asms_names)
-        print(len(asms_names['060-660_r1_Cap1_F.norm_k21c1.asm_k']))
-        print(len(asms_names['060-660_r1_Cap1_F.norm_k21c10.asm_k']))
-        print('\nlengths', asms_lens)
-        print(len(asms_lens['060-660_r1_Cap1_F.norm_k21c1.asm_k']))
-        print(len(asms_lens['060-660_r1_Cap1_F.norm_k21c10.asm_k']))
-        print('\ncovs', asms_covs)
-        print(len(asms_covs['060-660_r1_Cap1_F.norm_k21c1.asm_k']))
-        print(len(asms_covs['060-660_r1_Cap1_F.norm_k21c10.asm_k']))
-        print('\ngc', asms_gc)
-        print(len(asms_gc['060-660_r1_Cap1_F.norm_k21c1.asm_k']))
-        print(len(asms_gc['060-660_r1_Cap1_F.norm_k21c10.asm_k']))
-        pprint.pprint(onecodex_taxa)
-        pprint.pprint(metadata_summaries)
+        # print('\npaths', asms_paths)
+        # print('\nasm_names', asms_names)
+        # print(len(asms_names['060-660_r1_Cap1_F.norm_k21c1.asm_k']))
+        # print(len(asms_names['060-660_r1_Cap1_F.norm_k21c10.asm_k']))
+        # print('\nlengths', asms_lens)
+        # print(len(asms_lens['060-660_r1_Cap1_F.norm_k21c1.asm_k']))
+        # print(len(asms_lens['060-660_r1_Cap1_F.norm_k21c10.asm_k']))
+        # print('\ncovs', asms_covs)
+        # print(len(asms_covs['060-660_r1_Cap1_F.norm_k21c1.asm_k']))
+        # print(len(asms_covs['060-660_r1_Cap1_F.norm_k21c10.asm_k']))
+        # print('\ngc', asms_gc)
+        # print(len(asms_gc['060-660_r1_Cap1_F.norm_k21c1.asm_k']))
+        # print(len(asms_gc['060-660_r1_Cap1_F.norm_k21c10.asm_k']))
+        # pprint.pprint(lca_taxa)
+        # pprint.pprint(metadata_summaries)
 
     else:
         asms_stats = dict(names=asms_names,
@@ -766,7 +722,7 @@ def main(
                           gc=asms_gc,
                           cpg=None)
 
-    chart_url = plotly(asms_names, asms_stats, onecodex, params)
+    chart_url = plotly(asms_names, asms_stats, lca, params)
     report(chart_url, start_time, time.time(), params)
 
 
